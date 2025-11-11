@@ -9,6 +9,7 @@ from mcp.types import Tool, TextContent
 from .client_manager import HyperliquidClientManager
 from .config import HyperliquidConfig
 from .decimal_manager import DecimalPrecisionManager
+from .errors import format_error_response
 from .tools import (
     get_account_state,
     get_all_assets,
@@ -502,11 +503,7 @@ class HyperliquidMCPServer:
 
             except Exception as e:
                 import json
-                error_result = {
-                    "success": False,
-                    "error": str(e),
-                    "error_type": type(e).__name__,
-                }
+                error_result = format_error_response(e)
                 return [TextContent(type="text", text=json.dumps(error_result, indent=2))]
 
     async def run(self):

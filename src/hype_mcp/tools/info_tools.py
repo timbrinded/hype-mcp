@@ -1,8 +1,11 @@
 """Info endpoint MCP tools for read-only operations."""
 
 from typing import Any, Optional
+from pydantic import ValidationError as PydanticValidationError
 
 from ..client_manager import HyperliquidClientManager
+from ..validation import WalletAddressParams, MarketDataParams
+from ..errors import format_error_response, APIError, AssetNotFoundError
 
 
 async def get_account_state(
@@ -39,22 +42,32 @@ async def get_account_state(
         >>> print(f"Positions: {state['assetPositions']}")
     """
     try:
+        # Validate input parameters using Pydantic
+        try:
+            params = WalletAddressParams(user_address=user_address)
+        except PydanticValidationError as e:
+            return format_error_response(e)
+        
         # Use configured wallet address if not specified
-        address = user_address or client_manager.wallet_address
+        address = params.user_address or client_manager.wallet_address
 
         # Query account state from Info endpoint
-        result = client_manager.info.user_state(address)
+        try:
+            result = client_manager.info.user_state(address)
+        except Exception as e:
+            raise APIError(
+                message=f"Failed to fetch account state from Hyperliquid API: {str(e)}",
+                api_response=None
+            ) from e
 
         return {
             "success": True,
             "data": result,
         }
+    except APIError as e:
+        return format_error_response(e)
     except Exception as e:
-        return {
-            "success": False,
-            "error": f"Failed to get account state: {str(e)}",
-            "error_type": type(e).__name__,
-        }
+        return format_error_response(e)
 
 
 async def get_open_orders(
@@ -95,22 +108,32 @@ async def get_open_orders(
         ...     print(f"{order['coin']}: {order['side']} {order['sz']} @ {order['px']}")
     """
     try:
+        # Validate input parameters using Pydantic
+        try:
+            params = WalletAddressParams(user_address=user_address)
+        except PydanticValidationError as e:
+            return format_error_response(e)
+        
         # Use configured wallet address if not specified
-        address = user_address or client_manager.wallet_address
+        address = params.user_address or client_manager.wallet_address
 
         # Query open orders from Info endpoint
-        result = client_manager.info.open_orders(address)
+        try:
+            result = client_manager.info.open_orders(address)
+        except Exception as e:
+            raise APIError(
+                message=f"Failed to fetch open orders from Hyperliquid API: {str(e)}",
+                api_response=None
+            ) from e
 
         return {
             "success": True,
             "data": result,
         }
+    except APIError as e:
+        return format_error_response(e)
     except Exception as e:
-        return {
-            "success": False,
-            "error": f"Failed to get open orders: {str(e)}",
-            "error_type": type(e).__name__,
-        }
+        return format_error_response(e)
 
 
 async def get_market_data(
@@ -151,8 +174,23 @@ async def get_market_data(
         >>> print(f"24h Volume: ${data['data']['dayNtlVlm']}")
     """
     try:
+        # Validate input parameters using Pydantic
+        try:
+            params = MarketDataParams(symbol=symbol)
+        except PydanticValidationError as e:
+            return format_error_response(e)
+        
+        # Use validated symbol
+        symbol = params.symbol
+
         # Query all market data
-        all_mids = client_manager.info.all_mids()
+        try:
+            all_mids = client_manager.info.all_mids()
+        except Exception as e:
+            raise APIError(
+                message=f"Failed to fetch market data from Hyperliquid API: {str(e)}",
+                api_response=None
+            ) from e
 
         # Check if symbol exists in spot or perp markets
         market_data = None
@@ -216,22 +254,16 @@ async def get_market_data(
                 }
 
         if market_data is None:
-            return {
-                "success": False,
-                "error": f"Symbol '{symbol}' not found in spot or perpetual markets",
-                "error_type": "ValueError",
-            }
+            raise AssetNotFoundError(symbol)
 
         return {
             "success": True,
             "data": market_data,
         }
+    except (APIError, AssetNotFoundError) as e:
+        return format_error_response(e)
     except Exception as e:
-        return {
-            "success": False,
-            "error": f"Failed to get market data for {symbol}: {str(e)}",
-            "error_type": type(e).__name__,
-        }
+        return format_error_response(e)
 
 
 async def get_all_assets(
@@ -273,18 +305,32 @@ async def get_all_assets(
     """
     try:
         # Get perpetual metadata
-        perp_meta = client_manager.info.meta()
+        try:
+            perp_meta = client_manager.info.meta()
+        except Exception as e:
+            raise APIError(
+                message=f"Failed to fetch perpetual metadata from Hyperliquid API: {str(e)}",
+                api_response=None
+            ) from e
+        
         perps = [
             {
                 "name": asset["name"],
                 "szDecimals": asset["szDecimals"],
                 "maxLeverage": asset.get("maxLeverage"),
             }
-            for asset in perp_meta["universe"]
+            for asset in perp_meta.get("universe", [])
         ]
 
         # Get spot metadata
-        spot_meta = client_manager.info.spot_meta()
+        try:
+            spot_meta = client_manager.info.spot_meta()
+        except Exception as e:
+            raise APIError(
+                message=f"Failed to fetch spot metadata from Hyperliquid API: {str(e)}",
+                api_response=None
+            ) from e
+        
         spots = []
         if spot_meta and "tokens" in spot_meta:
             spots = [
@@ -303,9 +349,7 @@ async def get_all_assets(
                 "spot": spots,
             },
         }
+    except APIError as e:
+        return format_error_response(e)
     except Exception as e:
-        return {
-            "success": False,
-            "error": f"Failed to get all assets: {str(e)}",
-            "error_type": type(e).__name__,
-        }
+        return format_error_response(e)

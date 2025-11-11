@@ -1,9 +1,25 @@
 """Exchange endpoint MCP tools for trade execution."""
 
 from typing import Any, Literal, Optional
+from pydantic import ValidationError as PydanticValidationError
 
 from ..client_manager import HyperliquidClientManager
 from ..decimal_manager import DecimalPrecisionManager
+from ..validation import (
+    SpotOrderParams,
+    PerpOrderParams,
+    CancelOrderParams,
+    ClosePositionParams,
+)
+from ..errors import (
+    format_error_response,
+    ValidationError,
+    APIError,
+    PrecisionError,
+    AssetNotFoundError,
+    LeverageExceededError,
+    PositionNotFoundError,
+)
 
 
 async def place_spot_order(
@@ -66,21 +82,57 @@ async def place_spot_order(
         ... )
     """
     try:
-        # Validate parameters
-        if order_type == "limit" and price is None:
-            return {
-                "success": False,
-                "error": "Price is required for limit orders",
-                "error_type": "ValueError",
-            }
+        # Validate input parameters using Pydantic
+        try:
+            params = SpotOrderParams(
+                symbol=symbol,
+                side=side,
+                size=size,
+                price=price,
+                order_type=order_type
+            )
+        except PydanticValidationError as e:
+            return format_error_response(e)
+        
+        # Use validated parameters
+        symbol = params.symbol
+        side = params.side
+        size = params.size
+        price = params.price
+        order_type = params.order_type
 
         # Format size with proper decimal precision
-        formatted_size = await decimal_manager.format_size_for_api(symbol, size)
+        try:
+            formatted_size = await decimal_manager.format_size_for_api(symbol, size)
+        except ValueError as e:
+            if "not found" in str(e).lower():
+                raise AssetNotFoundError(symbol) from e
+            raise PrecisionError(
+                message=f"Invalid size precision for {symbol}: {str(e)}",
+                symbol=symbol,
+                value=size,
+                constraint="size must match asset's szDecimals"
+            ) from e
 
         # Format price if provided
         formatted_price = None
         if price is not None:
-            formatted_price = await decimal_manager.format_price_for_api(symbol, price)
+            try:
+                formatted_price = await decimal_manager.format_price_for_api(symbol, price)
+            except ValueError as e:
+                if "significant figures" in str(e).lower():
+                    raise PrecisionError(
+                        message=f"Invalid price precision for {symbol}: {str(e)}",
+                        symbol=symbol,
+                        value=price,
+                        constraint="price must have max 5 significant figures"
+                    ) from e
+                raise PrecisionError(
+                    message=f"Invalid price precision for {symbol}: {str(e)}",
+                    symbol=symbol,
+                    value=price,
+                    constraint="price must match asset's decimal constraints"
+                ) from e
 
         # Convert side to Hyperliquid format ("B" for buy, "A" for sell/ask)
         is_buy = side.lower() == "buy"
@@ -96,7 +148,20 @@ async def place_spot_order(
         }
 
         # Submit order via Exchange client
-        result = client_manager.exchange.order(order_params, spot=True)
+        try:
+            result = client_manager.exchange.order(order_params, spot=True)
+        except Exception as e:
+            raise APIError(
+                message=f"Failed to submit spot order to Hyperliquid API: {str(e)}",
+                api_response=None
+            ) from e
+
+        # Check if order was successful
+        if result.get("status") != "ok":
+            raise APIError(
+                message=f"Order rejected by Hyperliquid: {result.get('response', 'Unknown error')}",
+                api_response=result
+            )
 
         return {
             "success": True,
@@ -106,32 +171,10 @@ async def place_spot_order(
             },
         }
 
-    except ValueError as e:
-        return {
-            "success": False,
-            "error": str(e),
-            "error_type": "ValueError",
-            "details": {
-                "symbol": symbol,
-                "side": side,
-                "size": size,
-                "price": price,
-                "order_type": order_type,
-            },
-        }
+    except (ValidationError, APIError, PrecisionError, AssetNotFoundError) as e:
+        return format_error_response(e)
     except Exception as e:
-        return {
-            "success": False,
-            "error": f"Failed to place spot order: {str(e)}",
-            "error_type": type(e).__name__,
-            "details": {
-                "symbol": symbol,
-                "side": side,
-                "size": size,
-                "price": price,
-                "order_type": order_type,
-            },
-        }
+        return format_error_response(e)
 
 
 async def place_perp_order(
@@ -213,43 +256,74 @@ async def place_perp_order(
         ... )
     """
     try:
-        # Validate parameters
-        if order_type == "limit" and price is None:
-            return {
-                "success": False,
-                "error": "Price is required for limit orders",
-                "error_type": "ValueError",
-            }
-
-        # Validate leverage is positive
-        if leverage <= 0:
-            return {
-                "success": False,
-                "error": f"Leverage must be positive, got {leverage}",
-                "error_type": "ValueError",
-            }
+        # Validate input parameters using Pydantic
+        try:
+            params = PerpOrderParams(
+                symbol=symbol,
+                side=side,
+                size=size,
+                leverage=leverage,
+                price=price,
+                order_type=order_type,
+                reduce_only=reduce_only
+            )
+        except PydanticValidationError as e:
+            return format_error_response(e)
+        
+        # Use validated parameters
+        symbol = params.symbol
+        side = params.side
+        size = params.size
+        leverage = params.leverage
+        price = params.price
+        order_type = params.order_type
+        reduce_only = params.reduce_only
 
         # Get asset metadata to check max leverage
-        metadata = await decimal_manager.get_asset_metadata(symbol)
+        try:
+            metadata = await decimal_manager.get_asset_metadata(symbol)
+        except ValueError as e:
+            if "not found" in str(e).lower():
+                raise AssetNotFoundError(symbol) from e
+            raise
+        
         if metadata.max_leverage is not None and leverage > metadata.max_leverage:
-            return {
-                "success": False,
-                "error": f"Leverage {leverage} exceeds maximum allowed leverage {metadata.max_leverage} for {symbol}",
-                "error_type": "ValueError",
-                "details": {
-                    "symbol": symbol,
-                    "requested_leverage": leverage,
-                    "max_leverage": metadata.max_leverage,
-                },
-            }
+            raise LeverageExceededError(
+                symbol=symbol,
+                requested_leverage=leverage,
+                max_leverage=metadata.max_leverage
+            )
 
         # Format size with proper decimal precision
-        formatted_size = await decimal_manager.format_size_for_api(symbol, size)
+        try:
+            formatted_size = await decimal_manager.format_size_for_api(symbol, size)
+        except ValueError as e:
+            raise PrecisionError(
+                message=f"Invalid size precision for {symbol}: {str(e)}",
+                symbol=symbol,
+                value=size,
+                constraint="size must match asset's szDecimals"
+            ) from e
 
         # Format price if provided
         formatted_price = None
         if price is not None:
-            formatted_price = await decimal_manager.format_price_for_api(symbol, price)
+            try:
+                formatted_price = await decimal_manager.format_price_for_api(symbol, price)
+            except ValueError as e:
+                if "significant figures" in str(e).lower():
+                    raise PrecisionError(
+                        message=f"Invalid price precision for {symbol}: {str(e)}",
+                        symbol=symbol,
+                        value=price,
+                        constraint="price must have max 5 significant figures"
+                    ) from e
+                raise PrecisionError(
+                    message=f"Invalid price precision for {symbol}: {str(e)}",
+                    symbol=symbol,
+                    value=price,
+                    constraint="price must match asset's decimal constraints"
+                ) from e
 
         # Convert side to Hyperliquid format ("B" for buy, "A" for sell/ask)
         is_buy = side.lower() == "buy"
@@ -265,7 +339,20 @@ async def place_perp_order(
         }
 
         # Submit order via Exchange client (spot=False for perpetuals)
-        result = client_manager.exchange.order(order_params, spot=False)
+        try:
+            result = client_manager.exchange.order(order_params, spot=False)
+        except Exception as e:
+            raise APIError(
+                message=f"Failed to submit perpetual order to Hyperliquid API: {str(e)}",
+                api_response=None
+            ) from e
+
+        # Check if order was successful
+        if result.get("status") != "ok":
+            raise APIError(
+                message=f"Order rejected by Hyperliquid: {result.get('response', 'Unknown error')}",
+                api_response=result
+            )
 
         return {
             "success": True,
@@ -276,36 +363,10 @@ async def place_perp_order(
             },
         }
 
-    except ValueError as e:
-        return {
-            "success": False,
-            "error": str(e),
-            "error_type": "ValueError",
-            "details": {
-                "symbol": symbol,
-                "side": side,
-                "size": size,
-                "leverage": leverage,
-                "price": price,
-                "order_type": order_type,
-                "reduce_only": reduce_only,
-            },
-        }
+    except (ValidationError, APIError, PrecisionError, AssetNotFoundError, LeverageExceededError) as e:
+        return format_error_response(e)
     except Exception as e:
-        return {
-            "success": False,
-            "error": f"Failed to place perpetual order: {str(e)}",
-            "error_type": type(e).__name__,
-            "details": {
-                "symbol": symbol,
-                "side": side,
-                "size": size,
-                "leverage": leverage,
-                "price": price,
-                "order_type": order_type,
-                "reduce_only": reduce_only,
-            },
-        }
+        return format_error_response(e)
 
 
 async def cancel_order(
@@ -349,6 +410,19 @@ async def cancel_order(
         >>> print(f"Cancellation status: {result['data']['status']}")
     """
     try:
+        # Validate input parameters using Pydantic
+        try:
+            params = CancelOrderParams(
+                symbol=symbol,
+                order_id=order_id
+            )
+        except PydanticValidationError as e:
+            return format_error_response(e)
+        
+        # Use validated parameters
+        symbol = params.symbol
+        order_id = params.order_id
+
         # Prepare cancellation parameters
         cancel_params = {
             "coin": symbol,
@@ -356,7 +430,25 @@ async def cancel_order(
         }
 
         # Submit cancellation via Exchange client
-        result = client_manager.exchange.cancel(cancel_params)
+        try:
+            result = client_manager.exchange.cancel(cancel_params)
+        except Exception as e:
+            raise APIError(
+                message=f"Failed to cancel order via Hyperliquid API: {str(e)}",
+                api_response=None
+            ) from e
+
+        # Check if cancellation was successful
+        if result.get("status") != "ok":
+            # Check if order not found
+            response_str = str(result.get("response", ""))
+            if "not found" in response_str.lower() or "does not exist" in response_str.lower():
+                raise OrderNotFoundError(symbol=symbol, order_id=order_id)
+            
+            raise APIError(
+                message=f"Order cancellation rejected by Hyperliquid: {result.get('response', 'Unknown error')}",
+                api_response=result
+            )
 
         return {
             "success": True,
@@ -368,16 +460,10 @@ async def cancel_order(
             },
         }
 
+    except (ValidationError, APIError, OrderNotFoundError) as e:
+        return format_error_response(e)
     except Exception as e:
-        return {
-            "success": False,
-            "error": f"Failed to cancel order: {str(e)}",
-            "error_type": type(e).__name__,
-            "details": {
-                "symbol": symbol,
-                "order_id": order_id,
-            },
-        }
+        return format_error_response(e)
 
 
 async def cancel_all_orders(
@@ -424,17 +510,25 @@ async def cancel_all_orders(
         >>> print(f"Cancelled {result['data']['cancelled_count']} orders")
     """
     try:
+        # Validate symbol if provided
+        if symbol is not None:
+            try:
+                from ..validation import MarketDataParams
+                params = MarketDataParams(symbol=symbol)
+                symbol = params.symbol
+            except PydanticValidationError as e:
+                return format_error_response(e)
+
         # First, get all open orders to count them
         from .info_tools import get_open_orders
         
         orders_result = await get_open_orders(client_manager)
         
         if not orders_result.get("success"):
-            return {
-                "success": False,
-                "error": "Failed to fetch open orders before cancellation",
-                "error_type": "APIError",
-            }
+            raise APIError(
+                message="Failed to fetch open orders before cancellation",
+                api_response=orders_result
+            )
         
         open_orders = orders_result.get("data", [])
         
@@ -493,15 +587,10 @@ async def cancel_all_orders(
             },
         }
 
+    except (ValidationError, APIError) as e:
+        return format_error_response(e)
     except Exception as e:
-        return {
-            "success": False,
-            "error": f"Failed to cancel orders: {str(e)}",
-            "error_type": type(e).__name__,
-            "details": {
-                "symbol": symbol,
-            },
-        }
+        return format_error_response(e)
 
 
 async def close_position(
@@ -559,17 +648,29 @@ async def close_position(
         >>> print(f"Closed {result['data']['closed_size']} ETH")
     """
     try:
+        # Validate input parameters using Pydantic
+        try:
+            params = ClosePositionParams(
+                symbol=symbol,
+                size=size
+            )
+        except PydanticValidationError as e:
+            return format_error_response(e)
+        
+        # Use validated parameters
+        symbol = params.symbol
+        size = params.size
+
         # Get current account state to find the position
         from .info_tools import get_account_state
         
         account_result = await get_account_state(client_manager)
         
         if not account_result.get("success"):
-            return {
-                "success": False,
-                "error": "Failed to fetch account state",
-                "error_type": "APIError",
-            }
+            raise APIError(
+                message="Failed to fetch account state",
+                api_response=account_result
+            )
         
         # Find the position for this symbol
         positions = account_result.get("data", {}).get("assetPositions", [])
@@ -581,28 +682,14 @@ async def close_position(
                 break
         
         if not position:
-            return {
-                "success": False,
-                "error": f"No open position found for {symbol}",
-                "error_type": "ValueError",
-                "details": {
-                    "symbol": symbol,
-                },
-            }
+            raise PositionNotFoundError(symbol=symbol)
         
         # Get position details
         position_size_str = position.get("szi", "0")
         position_size = float(position_size_str)
         
         if position_size == 0:
-            return {
-                "success": False,
-                "error": f"Position size is zero for {symbol}",
-                "error_type": "ValueError",
-                "details": {
-                    "symbol": symbol,
-                },
-            }
+            raise PositionNotFoundError(symbol=symbol)
         
         # Determine position side and closing side
         is_long = position_size > 0
@@ -617,16 +704,12 @@ async def close_position(
         else:
             # Close partial position
             if size > abs_position_size:
-                return {
-                    "success": False,
-                    "error": f"Requested close size {size} exceeds position size {abs_position_size}",
-                    "error_type": "ValueError",
-                    "details": {
-                        "symbol": symbol,
-                        "requested_size": size,
-                        "position_size": abs_position_size,
-                    },
-                }
+                raise ValidationError(
+                    message=f"Requested close size {size} exceeds position size {abs_position_size}. You can only close up to {abs_position_size}.",
+                    field="size",
+                    value=size,
+                    constraint=f"size must be <= {abs_position_size}"
+                )
             close_size = size
         
         # Place opposite order to close position
@@ -651,23 +734,7 @@ async def close_position(
         
         return result
 
-    except ValueError as e:
-        return {
-            "success": False,
-            "error": str(e),
-            "error_type": "ValueError",
-            "details": {
-                "symbol": symbol,
-                "size": size,
-            },
-        }
+    except (ValidationError, APIError, PositionNotFoundError, PrecisionError, AssetNotFoundError, LeverageExceededError) as e:
+        return format_error_response(e)
     except Exception as e:
-        return {
-            "success": False,
-            "error": f"Failed to close position: {str(e)}",
-            "error_type": type(e).__name__,
-            "details": {
-                "symbol": symbol,
-                "size": size,
-            },
-        }
+        return format_error_response(e)
