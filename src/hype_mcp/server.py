@@ -1,32 +1,22 @@
 """Main MCP server implementation."""
 
-from typing import Optional
+from .config import HyperliquidConfig
 
 
 class HyperliquidMCPServer:
     """Main MCP server class for Hyperliquid integration."""
 
-    def __init__(
-        self,
-        testnet: bool = True,
-        wallet_address: Optional[str] = None,
-        private_key: Optional[str] = None,
-    ):
+    def __init__(self, config: HyperliquidConfig):
         """
         Initialize the Hyperliquid MCP server.
 
         Args:
-            testnet: Whether to use testnet (default: True)
-            wallet_address: Wallet address (defaults to address derived from private key)
-            private_key: Private key for signing transactions (required)
+            config: Validated configuration for the server
         """
-        if private_key is None:
-            raise ValueError("Private key is required")
-
-        self.testnet = testnet
-        self.private_key = private_key
-        self.wallet_address = wallet_address
-        # TODO: Derive wallet address from private key if not provided
+        self.config = config
+        self.testnet = config.testnet
+        self.private_key = config.private_key
+        self.wallet_address = config.wallet_address
 
     async def run(self):
         """Start the MCP server."""
