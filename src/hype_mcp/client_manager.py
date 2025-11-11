@@ -2,6 +2,7 @@
 
 from typing import Optional
 
+from eth_account import Account
 from hyperliquid.info import Info
 from hyperliquid.exchange import Exchange
 
@@ -69,8 +70,10 @@ class HyperliquidClientManager:
             Initialized Exchange client
         """
         if self._exchange_client is None:
+            # Create LocalAccount from private key
+            wallet = Account.from_key(self.private_key)
             self._exchange_client = Exchange(
-                wallet_address=self.wallet_address,
+                wallet=wallet,
                 base_url=self.base_url,
                 account_address=self.account_address,
             )
