@@ -149,7 +149,7 @@ async def place_spot_order(
 
         # Submit order via Exchange client
         try:
-            result = client_manager.exchange.order(order_params, spot=True)
+            result = client_manager.exchange.order(order_params)
         except Exception as e:
             raise APIError(
                 message=f"Failed to submit spot order to Hyperliquid API: {str(e)}",
@@ -338,9 +338,9 @@ async def place_perp_order(
             "reduce_only": reduce_only,
         }
 
-        # Submit order via Exchange client (spot=False for perpetuals)
+        # Submit order via Exchange client
         try:
-            result = client_manager.exchange.order(order_params, spot=False)
+            result = client_manager.exchange.order(order_params)
         except Exception as e:
             raise APIError(
                 message=f"Failed to submit perpetual order to Hyperliquid API: {str(e)}",
