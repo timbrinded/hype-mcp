@@ -8,6 +8,7 @@ from .info_tools import (
 )
 from .exchange_tools import (
     place_spot_order,
+    place_perp_order,
 )
 
 __all__ = [
@@ -16,4 +17,5 @@ __all__ = [
     "get_market_data",
     "get_open_orders",
     "place_spot_order",
+    "place_perp_order",
 ]

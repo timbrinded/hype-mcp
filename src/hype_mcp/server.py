@@ -15,6 +15,7 @@ from .tools import (
     get_market_data,
     get_open_orders,
     place_spot_order,
+    place_perp_order,
 )
 
 
@@ -188,6 +189,77 @@ class HyperliquidMCPServer:
                         "required": ["symbol", "side", "size"],
                     },
                 ),
+                Tool(
+                    name="place_perp_order",
+                    description=(
+                        "Place a perpetual futures order. Decimal precision is handled automatically. "
+                        "You can place either market orders (immediate execution) or limit orders "
+                        "(execute at specific price). Supports leverage trading and reduce-only orders "
+                        "for position management. This tool automatically formats sizes and prices "
+                        "according to Hyperliquid's decimal precision requirements."
+                    ),
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "symbol": {
+                                "type": "string",
+                                "description": (
+                                    "Perpetual contract symbol (e.g., 'BTC', 'ETH', 'SOL'). Must be a "
+                                    "valid perpetual contract available on Hyperliquid."
+                                ),
+                            },
+                            "side": {
+                                "type": "string",
+                                "enum": ["buy", "sell"],
+                                "description": (
+                                    "Order side - 'buy' to go long (bet on price increase), 'sell' to "
+                                    "go short (bet on price decrease)"
+                                ),
+                            },
+                            "size": {
+                                "type": "number",
+                                "description": (
+                                    "Position size in human-readable format (e.g., 0.5 for 0.5 BTC, "
+                                    "10 for 10 ETH). Will be automatically formatted to match asset's "
+                                    "decimal precision."
+                                ),
+                            },
+                            "leverage": {
+                                "type": "integer",
+                                "description": (
+                                    "Leverage multiplier (e.g., 5 for 5x leverage, 10 for 10x leverage). "
+                                    "Must be within the asset's maximum allowed leverage. Higher leverage "
+                                    "amplifies both gains and losses."
+                                ),
+                            },
+                            "price": {
+                                "type": "number",
+                                "description": (
+                                    "Limit price for the order. Required for limit orders, ignored for "
+                                    "market orders. Will be automatically formatted to match precision rules."
+                                ),
+                            },
+                            "order_type": {
+                                "type": "string",
+                                "enum": ["market", "limit"],
+                                "description": (
+                                    "Type of order - 'market' for immediate execution at current market "
+                                    "price, 'limit' to execute only at specified price or better. "
+                                    "Defaults to 'market'."
+                                ),
+                            },
+                            "reduce_only": {
+                                "type": "boolean",
+                                "description": (
+                                    "If true, order can only reduce an existing position and cannot "
+                                    "increase it or open a new position. Useful for taking profits or "
+                                    "cutting losses. Defaults to false."
+                                ),
+                            },
+                        },
+                        "required": ["symbol", "side", "size", "leverage"],
+                    },
+                ),
             ]
 
         @self.mcp.call_tool()
@@ -250,6 +322,48 @@ class HyperliquidMCPServer:
                         size=arguments["size"],
                         price=arguments.get("price"),
                         order_type=arguments.get("order_type", "market"),
+                    )
+                elif name == "place_perp_order":
+                    # Validate required parameters
+                    if "symbol" not in arguments:
+                        return [
+                            TextContent(
+                                type="text",
+                                text='{"success": false, "error": "symbol parameter is required"}',
+                            )
+                        ]
+                    if "side" not in arguments:
+                        return [
+                            TextContent(
+                                type="text",
+                                text='{"success": false, "error": "side parameter is required"}',
+                            )
+                        ]
+                    if "size" not in arguments:
+                        return [
+                            TextContent(
+                                type="text",
+                                text='{"success": false, "error": "size parameter is required"}',
+                            )
+                        ]
+                    if "leverage" not in arguments:
+                        return [
+                            TextContent(
+                                type="text",
+                                text='{"success": false, "error": "leverage parameter is required"}',
+                            )
+                        ]
+                    
+                    result = await place_perp_order(
+                        self.client_manager,
+                        self.decimal_manager,
+                        symbol=arguments["symbol"],
+                        side=arguments["side"],
+                        size=arguments["size"],
+                        leverage=arguments["leverage"],
+                        price=arguments.get("price"),
+                        order_type=arguments.get("order_type", "market"),
+                        reduce_only=arguments.get("reduce_only", False),
                     )
                 else:
                     return [
