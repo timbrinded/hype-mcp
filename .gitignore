@@ -1,0 +1,4 @@
+.kiro/
+
+*.toml
+!py-project.toml
