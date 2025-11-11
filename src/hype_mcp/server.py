@@ -16,6 +16,9 @@ from .tools import (
     get_open_orders,
     place_spot_order,
     place_perp_order,
+    cancel_order,
+    cancel_all_orders,
+    close_position,
 )
 
 
@@ -260,6 +263,83 @@ class HyperliquidMCPServer:
                         "required": ["symbol", "side", "size", "leverage"],
                     },
                 ),
+                Tool(
+                    name="cancel_order",
+                    description=(
+                        "Cancel an open order. You need to provide the asset symbol and the order ID. "
+                        "The order ID can be obtained from the get_open_orders tool."
+                    ),
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "symbol": {
+                                "type": "string",
+                                "description": (
+                                    "Asset symbol for the order (e.g., 'BTC', 'ETH', 'PURR'). Must match "
+                                    "the symbol of the order you want to cancel."
+                                ),
+                            },
+                            "order_id": {
+                                "type": "integer",
+                                "description": (
+                                    "Order ID to cancel. This is the unique identifier returned when "
+                                    "the order was placed or can be found using get_open_orders."
+                                ),
+                            },
+                        },
+                        "required": ["symbol", "order_id"],
+                    },
+                ),
+                Tool(
+                    name="cancel_all_orders",
+                    description=(
+                        "Cancel all open orders, optionally filtered by symbol. If no symbol is provided, "
+                        "all open orders across all assets will be cancelled. Returns the count of "
+                        "cancelled orders."
+                    ),
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "symbol": {
+                                "type": "string",
+                                "description": (
+                                    "Optional asset symbol to filter cancellations (e.g., 'BTC', 'ETH', 'PURR'). "
+                                    "If provided, only orders for this symbol will be cancelled. If not provided, "
+                                    "all orders across all assets will be cancelled."
+                                ),
+                            },
+                        },
+                    },
+                ),
+                Tool(
+                    name="close_position",
+                    description=(
+                        "Close a perpetual position (full or partial). Automatically queries your current "
+                        "position to determine the correct side and size. You can close the entire position "
+                        "or specify a partial size to close."
+                    ),
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "symbol": {
+                                "type": "string",
+                                "description": (
+                                    "Perpetual contract symbol (e.g., 'BTC', 'ETH', 'SOL'). Must be a "
+                                    "valid perpetual contract with an open position."
+                                ),
+                            },
+                            "size": {
+                                "type": "number",
+                                "description": (
+                                    "Optional amount to close. If not provided, closes the entire position. "
+                                    "If provided, must not exceed the current position size. Will be "
+                                    "automatically formatted to match asset's decimal precision."
+                                ),
+                            },
+                        },
+                        "required": ["symbol"],
+                    },
+                ),
             ]
 
         @self.mcp.call_tool()
@@ -364,6 +444,49 @@ class HyperliquidMCPServer:
                         price=arguments.get("price"),
                         order_type=arguments.get("order_type", "market"),
                         reduce_only=arguments.get("reduce_only", False),
+                    )
+                elif name == "cancel_order":
+                    # Validate required parameters
+                    if "symbol" not in arguments:
+                        return [
+                            TextContent(
+                                type="text",
+                                text='{"success": false, "error": "symbol parameter is required"}',
+                            )
+                        ]
+                    if "order_id" not in arguments:
+                        return [
+                            TextContent(
+                                type="text",
+                                text='{"success": false, "error": "order_id parameter is required"}',
+                            )
+                        ]
+                    
+                    result = await cancel_order(
+                        self.client_manager,
+                        symbol=arguments["symbol"],
+                        order_id=arguments["order_id"],
+                    )
+                elif name == "cancel_all_orders":
+                    result = await cancel_all_orders(
+                        self.client_manager,
+                        symbol=arguments.get("symbol"),
+                    )
+                elif name == "close_position":
+                    # Validate required parameters
+                    if "symbol" not in arguments:
+                        return [
+                            TextContent(
+                                type="text",
+                                text='{"success": false, "error": "symbol parameter is required"}',
+                            )
+                        ]
+                    
+                    result = await close_position(
+                        self.client_manager,
+                        self.decimal_manager,
+                        symbol=arguments["symbol"],
+                        size=arguments.get("size"),
                     )
                 else:
                     return [

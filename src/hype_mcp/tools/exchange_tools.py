@@ -308,7 +308,366 @@ async def place_perp_order(
         }
 
 
-# TODO: Implement remaining Exchange endpoint tools:
-# - cancel_order
-# - cancel_all_orders
-# - close_position
+async def cancel_order(
+    client_manager: HyperliquidClientManager,
+    symbol: str,
+    order_id: int,
+) -> dict[str, Any]:
+    """
+    Cancel an open order.
+
+    This tool cancels a specific open order on Hyperliquid. You need to provide
+    the asset symbol and the order ID. The order ID can be obtained from the
+    get_open_orders tool.
+
+    Args:
+        client_manager: Hyperliquid client manager instance
+        symbol: Asset symbol for the order (e.g., "BTC", "ETH", "PURR"). Must match
+               the symbol of the order you want to cancel.
+        order_id: Order ID to cancel. This is the unique identifier returned when
+                 the order was placed or can be found using get_open_orders.
+
+    Returns:
+        Dictionary containing:
+        - success: Boolean indicating if the cancellation was successful
+        - data: Cancellation result including:
+            - status: "ok" if successful, or error details
+            - response: Cancellation confirmation
+        - error: Error message if the cancellation failed
+        - error_type: Type of error that occurred
+
+    Raises:
+        Exception: If the API request fails or order cannot be cancelled
+
+    Example:
+        >>> # Cancel a specific order
+        >>> result = await cancel_order(
+        ...     client_manager,
+        ...     symbol="BTC",
+        ...     order_id=123456789
+        ... )
+        >>> print(f"Cancellation status: {result['data']['status']}")
+    """
+    try:
+        # Prepare cancellation parameters
+        cancel_params = {
+            "coin": symbol,
+            "oid": order_id,
+        }
+
+        # Submit cancellation via Exchange client
+        result = client_manager.exchange.cancel(cancel_params)
+
+        return {
+            "success": True,
+            "data": {
+                "status": result.get("status", "unknown"),
+                "response": result.get("response", {}),
+                "cancelled_order_id": order_id,
+                "symbol": symbol,
+            },
+        }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Failed to cancel order: {str(e)}",
+            "error_type": type(e).__name__,
+            "details": {
+                "symbol": symbol,
+                "order_id": order_id,
+            },
+        }
+
+
+async def cancel_all_orders(
+    client_manager: HyperliquidClientManager,
+    symbol: Optional[str] = None,
+) -> dict[str, Any]:
+    """
+    Cancel all open orders, optionally filtered by symbol.
+
+    This tool cancels all open orders on Hyperliquid. You can optionally filter
+    by symbol to cancel only orders for a specific asset. If no symbol is provided,
+    all open orders across all assets will be cancelled.
+
+    Args:
+        client_manager: Hyperliquid client manager instance
+        symbol: Optional asset symbol to filter cancellations (e.g., "BTC", "ETH", "PURR").
+               If provided, only orders for this symbol will be cancelled. If None,
+               all orders across all assets will be cancelled.
+
+    Returns:
+        Dictionary containing:
+        - success: Boolean indicating if the cancellation was successful
+        - data: Cancellation result including:
+            - status: "ok" if successful, or error details
+            - response: Cancellation confirmation
+            - cancelled_count: Number of orders cancelled
+            - symbol: Symbol filter used (if any)
+        - error: Error message if the cancellation failed
+        - error_type: Type of error that occurred
+
+    Raises:
+        Exception: If the API request fails or orders cannot be cancelled
+
+    Example:
+        >>> # Cancel all orders for BTC
+        >>> result = await cancel_all_orders(
+        ...     client_manager,
+        ...     symbol="BTC"
+        ... )
+        >>> print(f"Cancelled {result['data']['cancelled_count']} orders")
+
+        >>> # Cancel all orders across all assets
+        >>> result = await cancel_all_orders(client_manager)
+        >>> print(f"Cancelled {result['data']['cancelled_count']} orders")
+    """
+    try:
+        # First, get all open orders to count them
+        from .info_tools import get_open_orders
+        
+        orders_result = await get_open_orders(client_manager)
+        
+        if not orders_result.get("success"):
+            return {
+                "success": False,
+                "error": "Failed to fetch open orders before cancellation",
+                "error_type": "APIError",
+            }
+        
+        open_orders = orders_result.get("data", [])
+        
+        # Filter by symbol if provided
+        if symbol:
+            orders_to_cancel = [o for o in open_orders if o.get("coin") == symbol]
+        else:
+            orders_to_cancel = open_orders
+        
+        if not orders_to_cancel:
+            return {
+                "success": True,
+                "data": {
+                    "status": "ok",
+                    "cancelled_count": 0,
+                    "symbol": symbol,
+                    "message": f"No open orders found{f' for {symbol}' if symbol else ''}",
+                },
+            }
+        
+        # Cancel each order
+        cancelled_count = 0
+        failed_cancellations = []
+        
+        for order in orders_to_cancel:
+            try:
+                cancel_params = {
+                    "coin": order["coin"],
+                    "oid": order["oid"],
+                }
+                result = client_manager.exchange.cancel(cancel_params)
+                
+                if result.get("status") == "ok":
+                    cancelled_count += 1
+                else:
+                    failed_cancellations.append({
+                        "order_id": order["oid"],
+                        "symbol": order["coin"],
+                        "error": result.get("response", "Unknown error"),
+                    })
+            except Exception as e:
+                failed_cancellations.append({
+                    "order_id": order["oid"],
+                    "symbol": order["coin"],
+                    "error": str(e),
+                })
+        
+        return {
+            "success": True,
+            "data": {
+                "status": "ok",
+                "cancelled_count": cancelled_count,
+                "total_orders": len(orders_to_cancel),
+                "symbol": symbol,
+                "failed_cancellations": failed_cancellations if failed_cancellations else None,
+            },
+        }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Failed to cancel orders: {str(e)}",
+            "error_type": type(e).__name__,
+            "details": {
+                "symbol": symbol,
+            },
+        }
+
+
+async def close_position(
+    client_manager: HyperliquidClientManager,
+    decimal_manager: DecimalPrecisionManager,
+    symbol: str,
+    size: Optional[float] = None,
+) -> dict[str, Any]:
+    """
+    Close a perpetual position (full or partial).
+
+    This tool closes an open perpetual position by placing an opposite order.
+    It automatically queries your current position to determine the correct side
+    and size. You can close the entire position or specify a partial size to close.
+
+    Args:
+        client_manager: Hyperliquid client manager instance
+        decimal_manager: Decimal precision manager for formatting
+        symbol: Perpetual contract symbol (e.g., "BTC", "ETH", "SOL"). Must be a
+               valid perpetual contract with an open position.
+        size: Optional amount to close. If not provided, closes the entire position.
+             If provided, must not exceed the current position size. Will be
+             automatically formatted to match asset's decimal precision.
+
+    Returns:
+        Dictionary containing:
+        - success: Boolean indicating if the position was closed successfully
+        - data: Close result including:
+            - status: "ok" if successful, or error details
+            - response: Order confirmation for the closing trade
+            - closed_size: Amount of position closed
+            - side: Side of the closing order ("buy" or "sell")
+            - position_side: Original position side ("long" or "short")
+        - error: Error message if the close failed
+        - error_type: Type of error that occurred
+
+    Raises:
+        ValueError: If no position exists for the symbol or size exceeds position
+        Exception: If the API request fails or order is rejected
+
+    Example:
+        >>> # Close entire BTC position
+        >>> result = await close_position(
+        ...     client_manager, decimal_manager,
+        ...     symbol="BTC"
+        ... )
+        >>> print(f"Closed {result['data']['closed_size']} BTC position")
+
+        >>> # Close partial ETH position (close 0.5 ETH of a larger position)
+        >>> result = await close_position(
+        ...     client_manager, decimal_manager,
+        ...     symbol="ETH",
+        ...     size=0.5
+        ... )
+        >>> print(f"Closed {result['data']['closed_size']} ETH")
+    """
+    try:
+        # Get current account state to find the position
+        from .info_tools import get_account_state
+        
+        account_result = await get_account_state(client_manager)
+        
+        if not account_result.get("success"):
+            return {
+                "success": False,
+                "error": "Failed to fetch account state",
+                "error_type": "APIError",
+            }
+        
+        # Find the position for this symbol
+        positions = account_result.get("data", {}).get("assetPositions", [])
+        position = None
+        
+        for pos in positions:
+            if pos.get("position", {}).get("coin") == symbol:
+                position = pos.get("position", {})
+                break
+        
+        if not position:
+            return {
+                "success": False,
+                "error": f"No open position found for {symbol}",
+                "error_type": "ValueError",
+                "details": {
+                    "symbol": symbol,
+                },
+            }
+        
+        # Get position details
+        position_size_str = position.get("szi", "0")
+        position_size = float(position_size_str)
+        
+        if position_size == 0:
+            return {
+                "success": False,
+                "error": f"Position size is zero for {symbol}",
+                "error_type": "ValueError",
+                "details": {
+                    "symbol": symbol,
+                },
+            }
+        
+        # Determine position side and closing side
+        is_long = position_size > 0
+        position_side = "long" if is_long else "short"
+        closing_side = "sell" if is_long else "buy"
+        
+        # Determine size to close
+        abs_position_size = abs(position_size)
+        if size is None:
+            # Close entire position
+            close_size = abs_position_size
+        else:
+            # Close partial position
+            if size > abs_position_size:
+                return {
+                    "success": False,
+                    "error": f"Requested close size {size} exceeds position size {abs_position_size}",
+                    "error_type": "ValueError",
+                    "details": {
+                        "symbol": symbol,
+                        "requested_size": size,
+                        "position_size": abs_position_size,
+                    },
+                }
+            close_size = size
+        
+        # Place opposite order to close position
+        # Use reduce_only=True to ensure we only close, not open opposite position
+        result = await place_perp_order(
+            client_manager=client_manager,
+            decimal_manager=decimal_manager,
+            symbol=symbol,
+            side=closing_side,
+            size=close_size,
+            leverage=1,  # Leverage doesn't matter for closing
+            order_type="market",
+            reduce_only=True,
+        )
+        
+        if result.get("success"):
+            # Add additional context to the result
+            result["data"]["closed_size"] = close_size
+            result["data"]["side"] = closing_side
+            result["data"]["position_side"] = position_side
+            result["data"]["was_full_close"] = size is None
+        
+        return result
+
+    except ValueError as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": "ValueError",
+            "details": {
+                "symbol": symbol,
+                "size": size,
+            },
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Failed to close position: {str(e)}",
+            "error_type": type(e).__name__,
+            "details": {
+                "symbol": symbol,
+                "size": size,
+            },
+        }

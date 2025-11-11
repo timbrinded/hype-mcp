@@ -9,6 +9,9 @@ from .info_tools import (
 from .exchange_tools import (
     place_spot_order,
     place_perp_order,
+    cancel_order,
+    cancel_all_orders,
+    close_position,
 )
 
 __all__ = [
@@ -18,4 +21,7 @@ __all__ = [
     "get_open_orders",
     "place_spot_order",
     "place_perp_order",
+    "cancel_order",
+    "cancel_all_orders",
+    "close_position",
 ]
