@@ -1,25 +1,27 @@
 """Main MCP server implementation."""
 
-from typing import Any, Optional
+import json
+from functools import partial
+from typing import Any
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import Tool, TextContent
+from mcp.types import TextContent, Tool
 
 from .client_manager import HyperliquidClientManager
 from .config import HyperliquidConfig
 from .decimal_manager import DecimalPrecisionManager
 from .errors import format_error_response
 from .tools import (
+    cancel_all_orders,
+    cancel_order,
+    close_position,
     get_account_state,
     get_all_assets,
     get_market_data,
     get_open_orders,
-    place_spot_order,
     place_perp_order,
-    cancel_order,
-    cancel_all_orders,
-    close_position,
+    place_spot_order,
 )
 
 
@@ -50,11 +52,53 @@ class HyperliquidMCPServer:
             info_client=self.client_manager.info
         )
 
-        # Initialize MCP server
         self.mcp = Server("hyperliquid-mcp-server")
-
-        # Register tools
+        self._init_tool_handlers()
         self._register_tools()
+
+    def _init_tool_handlers(self) -> None:
+        self._tool_handlers = {
+            "get_account_state": partial(get_account_state, self.client_manager),
+            "get_open_orders": partial(get_open_orders, self.client_manager),
+            "get_market_data": partial(get_market_data, self.client_manager),
+            "get_all_assets": partial(get_all_assets, self.client_manager),
+            "place_spot_order": partial(
+                place_spot_order,
+                self.client_manager,
+                self.decimal_manager,
+            ),
+            "place_perp_order": partial(
+                place_perp_order,
+                self.client_manager,
+                self.decimal_manager,
+            ),
+            "cancel_order": partial(cancel_order, self.client_manager),
+            "cancel_all_orders": partial(cancel_all_orders, self.client_manager),
+            "close_position": partial(
+                close_position,
+                self.client_manager,
+                self.decimal_manager,
+            ),
+        }
+        self._tool_arguments = {
+            "get_account_state": ["user_address"],
+            "get_open_orders": ["user_address"],
+            "get_market_data": ["symbol"],
+            "get_all_assets": [],
+            "place_spot_order": ["symbol", "side", "size", "price", "order_type"],
+            "place_perp_order": [
+                "symbol",
+                "side",
+                "size",
+                "leverage",
+                "price",
+                "order_type",
+                "reduce_only",
+            ],
+            "cancel_order": ["symbol", "order_id"],
+            "cancel_all_orders": ["symbol"],
+            "close_position": ["symbol", "size"],
+        }
 
     def _register_tools(self):
         """Register all MCP tools."""
@@ -345,166 +389,25 @@ class HyperliquidMCPServer:
 
         @self.mcp.call_tool()
         async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
-            """Handle tool calls."""
+            handler = self._tool_handlers.get(name)
+            if handler is None:
+                error = {"success": False, "error": f"Unknown tool: {name}"}
+                return [TextContent(type="text", text=json.dumps(error, indent=2))]
+
+            arguments = arguments or {}
+            tool_args = {
+                key: arguments[key]
+                for key in self._tool_arguments.get(name, [])
+                if key in arguments
+            }
+
             try:
-                if name == "get_account_state":
-                    result = await get_account_state(
-                        self.client_manager,
-                        user_address=arguments.get("user_address"),
-                    )
-                elif name == "get_open_orders":
-                    result = await get_open_orders(
-                        self.client_manager,
-                        user_address=arguments.get("user_address"),
-                    )
-                elif name == "get_market_data":
-                    if "symbol" not in arguments:
-                        return [
-                            TextContent(
-                                type="text",
-                                text='{"success": false, "error": "symbol parameter is required"}',
-                            )
-                        ]
-                    result = await get_market_data(
-                        self.client_manager,
-                        symbol=arguments["symbol"],
-                    )
-                elif name == "get_all_assets":
-                    result = await get_all_assets(self.client_manager)
-                elif name == "place_spot_order":
-                    # Validate required parameters
-                    if "symbol" not in arguments:
-                        return [
-                            TextContent(
-                                type="text",
-                                text='{"success": false, "error": "symbol parameter is required"}',
-                            )
-                        ]
-                    if "side" not in arguments:
-                        return [
-                            TextContent(
-                                type="text",
-                                text='{"success": false, "error": "side parameter is required"}',
-                            )
-                        ]
-                    if "size" not in arguments:
-                        return [
-                            TextContent(
-                                type="text",
-                                text='{"success": false, "error": "size parameter is required"}',
-                            )
-                        ]
-                    
-                    result = await place_spot_order(
-                        self.client_manager,
-                        self.decimal_manager,
-                        symbol=arguments["symbol"],
-                        side=arguments["side"],
-                        size=arguments["size"],
-                        price=arguments.get("price"),
-                        order_type=arguments.get("order_type", "market"),
-                    )
-                elif name == "place_perp_order":
-                    # Validate required parameters
-                    if "symbol" not in arguments:
-                        return [
-                            TextContent(
-                                type="text",
-                                text='{"success": false, "error": "symbol parameter is required"}',
-                            )
-                        ]
-                    if "side" not in arguments:
-                        return [
-                            TextContent(
-                                type="text",
-                                text='{"success": false, "error": "side parameter is required"}',
-                            )
-                        ]
-                    if "size" not in arguments:
-                        return [
-                            TextContent(
-                                type="text",
-                                text='{"success": false, "error": "size parameter is required"}',
-                            )
-                        ]
-                    if "leverage" not in arguments:
-                        return [
-                            TextContent(
-                                type="text",
-                                text='{"success": false, "error": "leverage parameter is required"}',
-                            )
-                        ]
-                    
-                    result = await place_perp_order(
-                        self.client_manager,
-                        self.decimal_manager,
-                        symbol=arguments["symbol"],
-                        side=arguments["side"],
-                        size=arguments["size"],
-                        leverage=arguments["leverage"],
-                        price=arguments.get("price"),
-                        order_type=arguments.get("order_type", "market"),
-                        reduce_only=arguments.get("reduce_only", False),
-                    )
-                elif name == "cancel_order":
-                    # Validate required parameters
-                    if "symbol" not in arguments:
-                        return [
-                            TextContent(
-                                type="text",
-                                text='{"success": false, "error": "symbol parameter is required"}',
-                            )
-                        ]
-                    if "order_id" not in arguments:
-                        return [
-                            TextContent(
-                                type="text",
-                                text='{"success": false, "error": "order_id parameter is required"}',
-                            )
-                        ]
-                    
-                    result = await cancel_order(
-                        self.client_manager,
-                        symbol=arguments["symbol"],
-                        order_id=arguments["order_id"],
-                    )
-                elif name == "cancel_all_orders":
-                    result = await cancel_all_orders(
-                        self.client_manager,
-                        symbol=arguments.get("symbol"),
-                    )
-                elif name == "close_position":
-                    # Validate required parameters
-                    if "symbol" not in arguments:
-                        return [
-                            TextContent(
-                                type="text",
-                                text='{"success": false, "error": "symbol parameter is required"}',
-                            )
-                        ]
-                    
-                    result = await close_position(
-                        self.client_manager,
-                        self.decimal_manager,
-                        symbol=arguments["symbol"],
-                        size=arguments.get("size"),
-                    )
-                else:
-                    return [
-                        TextContent(
-                            type="text",
-                            text=f'{{"success": false, "error": "Unknown tool: {name}"}}',
-                        )
-                    ]
-
-                # Format result as JSON string
-                import json
-                return [TextContent(type="text", text=json.dumps(result, indent=2))]
-
-            except Exception as e:
-                import json
-                error_result = format_error_response(e)
+                result = await handler(**tool_args)
+            except Exception as exc:  # pragma: no cover - delegated to formatter
+                error_result = format_error_response(exc)
                 return [TextContent(type="text", text=json.dumps(error_result, indent=2))]
+
+            return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     async def run(self):
         """Start the MCP server."""

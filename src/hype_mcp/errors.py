@@ -27,7 +27,7 @@ class HyperliquidMCPError(Exception):
     
     def to_dict(self) -> dict[str, Any]:
         """Convert error to dictionary format for API responses."""
-        result = {
+        result: dict[str, Any] = {
             "success": False,
             "error": self.message,
             "error_type": self.error_type,
@@ -56,7 +56,7 @@ class ValidationError(HyperliquidMCPError):
             value: The invalid value
             constraint: Description of the constraint that was violated
         """
-        details = {}
+        details: dict[str, Any] = {}
         if field is not None:
             details["field"] = field
         if value is not None:
@@ -88,7 +88,7 @@ class APIError(HyperliquidMCPError):
             api_response: Raw API response if available
             status_code: HTTP status code if available
         """
-        details = {}
+        details: dict[str, Any] = {}
         if api_response is not None:
             details["api_response"] = api_response
         if status_code is not None:
