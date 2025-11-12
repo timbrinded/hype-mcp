@@ -2,10 +2,8 @@
 
 import pytest
 from unittest.mock import Mock
-from decimal import Decimal
 
 from hype_mcp.decimal_manager import DecimalPrecisionManager
-from hype_mcp.models import AssetMetadata
 
 
 class TestDecimalPrecisionManager:
@@ -15,17 +13,19 @@ class TestDecimalPrecisionManager:
     def mock_info_client(self):
         """Create a mock Info client."""
         mock = Mock()
-        mock.meta = Mock(return_value={
-            "universe": [
-                {"name": "BTC", "szDecimals": 4, "maxLeverage": 50},
-                {"name": "ETH", "szDecimals": 3, "maxLeverage": 50},
-                {"name": "SOL", "szDecimals": 2, "maxLeverage": 20},
-            ],
-            "tokens": [
-                {"name": "PURR", "szDecimals": 2, "index": 0},
-                {"name": "HYPE", "szDecimals": 1, "index": 1},
-            ]
-        })
+        mock.meta = Mock(
+            return_value={
+                "universe": [
+                    {"name": "BTC", "szDecimals": 4, "maxLeverage": 50},
+                    {"name": "ETH", "szDecimals": 3, "maxLeverage": 50},
+                    {"name": "SOL", "szDecimals": 2, "maxLeverage": 20},
+                ],
+                "tokens": [
+                    {"name": "PURR", "szDecimals": 2, "index": 0},
+                    {"name": "HYPE", "szDecimals": 1, "index": 1},
+                ],
+            }
+        )
         return mock
 
     @pytest.fixture
@@ -37,7 +37,7 @@ class TestDecimalPrecisionManager:
     async def test_get_asset_metadata_perp(self, manager):
         """Test fetching metadata for a perpetual asset."""
         metadata = await manager.get_asset_metadata("BTC")
-        
+
         assert metadata.symbol == "BTC"
         assert metadata.asset_type == "perp"
         assert metadata.sz_decimals == 4
@@ -48,7 +48,7 @@ class TestDecimalPrecisionManager:
     async def test_get_asset_metadata_spot(self, manager):
         """Test fetching metadata for a spot asset."""
         metadata = await manager.get_asset_metadata("PURR")
-        
+
         assert metadata.symbol == "PURR"
         assert metadata.asset_type == "spot"
         assert metadata.sz_decimals == 2
@@ -61,7 +61,7 @@ class TestDecimalPrecisionManager:
         # First call should fetch from API
         await manager.get_asset_metadata("BTC")
         assert mock_info_client.meta.call_count == 1
-        
+
         # Second call should use cache
         await manager.get_asset_metadata("BTC")
         assert mock_info_client.meta.call_count == 1  # Still 1, not 2
@@ -85,7 +85,7 @@ class TestDecimalPrecisionManager:
         # BTC has szDecimals=4
         result = await manager.format_size_for_api("BTC", 1.1000)
         assert result == "1.1"
-        
+
         result = await manager.format_size_for_api("BTC", 1.0)
         assert result == "1"
 
@@ -95,11 +95,11 @@ class TestDecimalPrecisionManager:
         # ETH has szDecimals=3
         result = await manager.format_size_for_api("ETH", 0.12345)
         assert result == "0.123"
-        
+
         # SOL has szDecimals=2
         result = await manager.format_size_for_api("SOL", 10.999)
         assert result == "10.99"
-        
+
         # HYPE has szDecimals=1
         result = await manager.format_size_for_api("HYPE", 100.567)
         assert result == "100.5"
@@ -110,7 +110,7 @@ class TestDecimalPrecisionManager:
         # BTC has szDecimals=4
         result = await manager.format_size_for_api("BTC", 0.00001)
         assert result == "0"
-        
+
         result = await manager.format_size_for_api("BTC", 0.00009)
         assert result == "0"
 
@@ -172,7 +172,7 @@ class TestDecimalPrecisionManager:
         # Use price with exactly 5 sig figs: 0.01234 (1,2,3,4 are the sig figs after leading zeros)
         result = await manager.format_price_for_api("PURR", 0.01234)
         assert result == "0.01234"
-        
+
         # BTC perp: max_decimals=6, sz_decimals=4, max_price_decimals=2
         result = await manager.format_price_for_api("BTC", 123.45)
         assert result == "123.45"
@@ -183,7 +183,7 @@ class TestDecimalPrecisionManager:
         # Very small price with spot asset (2 sig figs: 1,2)
         result = await manager.format_price_for_api("PURR", 0.00012)
         assert result == "0.00012"
-        
+
         # Price that rounds to zero
         result = await manager.format_price_for_api("PURR", 0.0000001)
         assert result == "0"
@@ -214,7 +214,7 @@ class TestDecimalPrecisionManager:
         """Test extracting spot asset metadata."""
         meta_response = mock_info_client.meta()
         metadata = manager._extract_spot_metadata("PURR", meta_response)
-        
+
         assert metadata.symbol == "PURR"
         assert metadata.asset_type == "spot"
         assert metadata.sz_decimals == 2
@@ -226,7 +226,7 @@ class TestDecimalPrecisionManager:
         """Test extracting perpetual asset metadata."""
         meta_response = mock_info_client.meta()
         metadata = manager._extract_perp_metadata("BTC", meta_response)
-        
+
         assert metadata.symbol == "BTC"
         assert metadata.asset_type == "perp"
         assert metadata.sz_decimals == 4

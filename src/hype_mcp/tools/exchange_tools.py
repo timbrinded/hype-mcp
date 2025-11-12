@@ -68,7 +68,9 @@ async def place_spot_order(
         limit_px: Optional[float] = None
         if order_type == "limit" and price is not None:
             try:
-                formatted_price = await decimal_manager.format_price_for_api(symbol, price)
+                formatted_price = await decimal_manager.format_price_for_api(
+                    symbol, price
+                )
             except ValueError as exc:
                 constraint = (
                     "price must have max 5 significant figures"
@@ -200,7 +202,9 @@ async def place_perp_order(
         limit_px: Optional[float] = None
         if order_type == "limit" and price is not None:
             try:
-                formatted_price = await decimal_manager.format_price_for_api(symbol, price)
+                formatted_price = await decimal_manager.format_price_for_api(
+                    symbol, price
+                )
             except ValueError as exc:
                 constraint = (
                     "price must have max 5 significant figures"
@@ -271,7 +275,13 @@ async def place_perp_order(
             },
         }
 
-    except (ValidationError, APIError, PrecisionError, AssetNotFoundError, LeverageExceededError) as exc:
+    except (
+        ValidationError,
+        APIError,
+        PrecisionError,
+        AssetNotFoundError,
+        LeverageExceededError,
+    ) as exc:
         return format_error_response(exc)
     except Exception as exc:
         return format_error_response(exc)
@@ -293,7 +303,9 @@ async def cancel_order(
     try:
         cancel_params = {"coin": symbol, "oid": order_id}
         try:
-            result = await asyncio.to_thread(client_manager.exchange.cancel, cancel_params)
+            result = await asyncio.to_thread(
+                client_manager.exchange.cancel, cancel_params
+            )
         except Exception as exc:
             raise APIError(
                 message=f"Failed to cancel order via Hyperliquid API: {exc}",
@@ -302,7 +314,10 @@ async def cancel_order(
 
         if result.get("status") != "ok":
             response_str = str(result.get("response", ""))
-            if "not found" in response_str.lower() or "does not exist" in response_str.lower():
+            if (
+                "not found" in response_str.lower()
+                or "does not exist" in response_str.lower()
+            ):
                 raise OrderNotFoundError(symbol=symbol, order_id=order_id)
             raise APIError(
                 message=f"Order cancellation rejected by Hyperliquid: {result.get('response', 'Unknown error')}",
@@ -471,42 +486,40 @@ async def close_position(
     size = params.size
 
     try:
-        
         # Get current account state to find the position
         from .info_tools import get_account_state
-        
+
         account_result = await get_account_state(client_manager)
-        
+
         if not account_result.get("success"):
             raise APIError(
-                message="Failed to fetch account state",
-                api_response=account_result
+                message="Failed to fetch account state", api_response=account_result
             )
-        
+
         # Find the position for this symbol
         positions = account_result.get("data", {}).get("assetPositions", [])
         position = None
-        
+
         for pos in positions:
             if pos.get("position", {}).get("coin") == symbol:
                 position = pos.get("position", {})
                 break
-        
+
         if not position:
             raise PositionNotFoundError(symbol=symbol)
-        
+
         # Get position details
         position_size_str = position.get("szi", "0")
         position_size = float(position_size_str)
-        
+
         if position_size == 0:
             raise PositionNotFoundError(symbol=symbol)
-        
+
         # Determine position side and closing side
         is_long = position_size > 0
         position_side = "long" if is_long else "short"
         closing_side = "sell" if is_long else "buy"
-        
+
         # Determine size to close
         abs_position_size = abs(position_size)
         if size is None:
@@ -519,10 +532,10 @@ async def close_position(
                     message=f"Requested close size {size} exceeds position size {abs_position_size}. You can only close up to {abs_position_size}.",
                     field="size",
                     value=size,
-                    constraint=f"size must be <= {abs_position_size}"
+                    constraint=f"size must be <= {abs_position_size}",
                 )
             close_size = size
-        
+
         # Close position using market_close for full close, or place_perp_order for partial
         if size is None:
             try:
@@ -565,17 +578,24 @@ async def close_position(
                 order_type="market",
                 reduce_only=True,
             )
-            
+
             if result.get("success"):
                 # Add additional context to the result
                 result["data"]["closed_size"] = close_size
                 result["data"]["side"] = closing_side
                 result["data"]["position_side"] = position_side
                 result["data"]["was_full_close"] = False
-        
+
         return result
 
-    except (ValidationError, APIError, PositionNotFoundError, PrecisionError, AssetNotFoundError, LeverageExceededError) as e:
+    except (
+        ValidationError,
+        APIError,
+        PositionNotFoundError,
+        PrecisionError,
+        AssetNotFoundError,
+        LeverageExceededError,
+    ) as e:
         return format_error_response(e)
     except Exception as e:
         return format_error_response(e)

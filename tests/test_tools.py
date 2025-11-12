@@ -1,7 +1,7 @@
 """Tests for MCP tools."""
 
 import pytest
-from unittest.mock import Mock, AsyncMock
+from unittest.mock import Mock
 
 from hype_mcp.client_manager import HyperliquidClientManager
 from hype_mcp.tools import (

@@ -9,6 +9,7 @@ from ..client_manager import HyperliquidClientManager
 from ..errors import APIError, AssetNotFoundError, format_error_response
 from ..validation import MarketDataParams, WalletAddressParams
 
+
 async def get_account_state(
     client_manager: HyperliquidClientManager,
     user_address: Optional[str] = None,
@@ -90,7 +91,11 @@ async def get_market_data(
                 )
             )
         perp_meta = next(
-            (asset for asset in meta.get("universe", []) if asset.get("name") == symbol),
+            (
+                asset
+                for asset in meta.get("universe", [])
+                if asset.get("name") == symbol
+            ),
             None,
         )
         if perp_meta:

@@ -32,9 +32,13 @@ class HyperliquidConfig:
                 "HYPERLIQUID_PRIVATE_KEY environment variable is required. Please set it to your private key for signing transactions.",
             )
         )
-        wallet_address = os.getenv("HYPERLIQUID_WALLET_ADDRESS") or cls._derive_wallet_address(private_key)
+        wallet_address = os.getenv(
+            "HYPERLIQUID_WALLET_ADDRESS"
+        ) or cls._derive_wallet_address(private_key)
         testnet = _bool_from_env(os.getenv("HYPERLIQUID_TESTNET"))
-        return cls(private_key=private_key, wallet_address=wallet_address, testnet=testnet)
+        return cls(
+            private_key=private_key, wallet_address=wallet_address, testnet=testnet
+        )
 
     @staticmethod
     def _normalize_private_key(raw_key: str) -> str:
@@ -44,7 +48,9 @@ class HyperliquidConfig:
         if len(key) != 66:
             raise ValueError(
                 "Invalid private key length: expected 66 characters (including 0x prefix), "
-                "got {len_val}. Private key should be a 64-character hex string.".format(len_val=len(key))
+                "got {len_val}. Private key should be a 64-character hex string.".format(
+                    len_val=len(key)
+                )
             )
         try:
             int(key, 16)

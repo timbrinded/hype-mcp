@@ -405,7 +405,9 @@ class HyperliquidMCPServer:
                 result = await handler(**tool_args)
             except Exception as exc:  # pragma: no cover - delegated to formatter
                 error_result = format_error_response(exc)
-                return [TextContent(type="text", text=json.dumps(error_result, indent=2))]
+                return [
+                    TextContent(type="text", text=json.dumps(error_result, indent=2))
+                ]
 
             return [TextContent(type="text", text=json.dumps(result, indent=2))]
 

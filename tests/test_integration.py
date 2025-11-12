@@ -39,7 +39,7 @@ class TestInfoEndpointIntegration:
 
         assert result["success"] is True
         assert "data" in result
-        
+
         data = result["data"]
         assert "assetPositions" in data
         assert "crossMarginSummary" in data
@@ -51,7 +51,7 @@ class TestInfoEndpointIntegration:
         """Test get_account_state with explicit wallet address."""
         result = await get_account_state(
             integration_client_manager,
-            user_address=integration_client_manager.wallet_address
+            user_address=integration_client_manager.wallet_address,
         )
 
         assert result["success"] is True
@@ -73,7 +73,7 @@ class TestInfoEndpointIntegration:
 
         assert result["success"] is True
         assert "data" in result
-        
+
         data = result["data"]
         assert data["coin"] == "BTC"
         assert "markPx" in data
@@ -87,11 +87,11 @@ class TestInfoEndpointIntegration:
         # First get all assets to find a valid spot asset
         assets_result = await get_all_assets(integration_client_manager)
         assert assets_result["success"] is True
-        
+
         spot_assets = assets_result["data"]["spot"]
         if not spot_assets:
             pytest.skip("No spot assets available on testnet")
-        
+
         # Test with first available spot asset
         spot_symbol = spot_assets[0]["name"]
         result = await get_market_data(integration_client_manager, spot_symbol)
@@ -116,20 +116,20 @@ class TestInfoEndpointIntegration:
 
         assert result["success"] is True
         assert "data" in result
-        
+
         data = result["data"]
         assert "perps" in data
         assert "spot" in data
         assert isinstance(data["perps"], list)
         assert isinstance(data["spot"], list)
-        
+
         # Verify perpetual metadata structure
         if data["perps"]:
             perp = data["perps"][0]
             assert "name" in perp
             assert "szDecimals" in perp
             assert "maxLeverage" in perp
-        
+
         # Verify spot metadata structure
         if data["spot"]:
             spot = data["spot"][0]
@@ -149,20 +149,20 @@ class TestExchangeEndpointIntegration:
         # Get available spot assets
         assets_result = await get_all_assets(integration_client_manager)
         spot_assets = assets_result["data"]["spot"]
-        
+
         if not spot_assets:
             pytest.skip("No spot assets available on testnet")
-        
+
         # Use first available spot asset with small size
         spot_symbol = spot_assets[0]["name"]
-        
+
         result = await place_spot_order(
             integration_client_manager,
             integration_decimal_manager,
             symbol=spot_symbol,
             side="buy",
             size=0.01,  # Very small size for testing
-            order_type="market"
+            order_type="market",
         )
 
         # Note: Order may fail due to insufficient balance, but API call should work
@@ -176,21 +176,21 @@ class TestExchangeEndpointIntegration:
         """Test spot limit order placement."""
         assets_result = await get_all_assets(integration_client_manager)
         spot_assets = assets_result["data"]["spot"]
-        
+
         if not spot_assets:
             pytest.skip("No spot assets available on testnet")
-        
+
         spot_symbol = spot_assets[0]["name"]
-        
+
         # Get current market price
         market_data = await get_market_data(integration_client_manager, spot_symbol)
         if not market_data["success"]:
             pytest.skip("Cannot get market data for spot asset")
-        
+
         current_price = float(market_data["data"].get("midPx", "1.0"))
         # Place limit order well below market (unlikely to fill)
         limit_price = current_price * 0.5
-        
+
         result = await place_spot_order(
             integration_client_manager,
             integration_decimal_manager,
@@ -198,7 +198,7 @@ class TestExchangeEndpointIntegration:
             side="buy",
             size=0.01,
             price=limit_price,
-            order_type="limit"
+            order_type="limit",
         )
 
         assert "success" in result
@@ -216,7 +216,7 @@ class TestExchangeEndpointIntegration:
             side="buy",
             size=0.001,  # Very small size for testing
             leverage=1,
-            order_type="market"
+            order_type="market",
         )
 
         # Note: Order may fail due to insufficient balance, but API call should work
@@ -231,11 +231,11 @@ class TestExchangeEndpointIntegration:
         # Get current BTC price
         market_data = await get_market_data(integration_client_manager, "BTC")
         assert market_data["success"] is True
-        
+
         current_price = float(market_data["data"]["markPx"])
         # Place limit order well below market (unlikely to fill)
         limit_price = current_price * 0.8
-        
+
         result = await place_perp_order(
             integration_client_manager,
             integration_decimal_manager,
@@ -244,7 +244,7 @@ class TestExchangeEndpointIntegration:
             size=0.001,
             leverage=2,
             price=limit_price,
-            order_type="limit"
+            order_type="limit",
         )
 
         assert "success" in result
@@ -262,7 +262,7 @@ class TestExchangeEndpointIntegration:
             side="buy",
             size=0.01,
             leverage=5,
-            order_type="market"
+            order_type="market",
         )
 
         assert "success" in result
@@ -280,7 +280,7 @@ class TestExchangeEndpointIntegration:
             side="buy",
             size=0.001,
             leverage=999,  # Exceeds max leverage
-            order_type="market"
+            order_type="market",
         )
 
         assert result["success"] is False
@@ -296,10 +296,10 @@ class TestExchangeEndpointIntegration:
         market_data = await get_market_data(integration_client_manager, "BTC")
         if not market_data["success"]:
             pytest.skip("Cannot get market data")
-        
+
         current_price = float(market_data["data"]["markPx"])
         limit_price = current_price * 0.5  # Well below market
-        
+
         order_result = await place_perp_order(
             integration_client_manager,
             integration_decimal_manager,
@@ -308,24 +308,22 @@ class TestExchangeEndpointIntegration:
             size=0.001,
             leverage=1,
             price=limit_price,
-            order_type="limit"
+            order_type="limit",
         )
 
         if not order_result.get("success"):
             pytest.skip("Cannot place order for cancellation test")
-        
+
         # Get the order ID from open orders
         orders_result = await get_open_orders(integration_client_manager)
         if not orders_result["success"] or not orders_result["data"]:
             pytest.skip("No open orders to cancel")
-        
+
         order_id = orders_result["data"][0]["oid"]
-        
+
         # Cancel the order
         cancel_result = await cancel_order(
-            integration_client_manager,
-            symbol="BTC",
-            order_id=order_id
+            integration_client_manager, symbol="BTC", order_id=order_id
         )
 
         assert "success" in cancel_result
@@ -356,9 +354,7 @@ class TestExchangeEndpointIntegration:
     ):
         """Test closing position when no position exists."""
         result = await close_position(
-            integration_client_manager,
-            integration_decimal_manager,
-            symbol="SOL"
+            integration_client_manager, integration_decimal_manager, symbol="SOL"
         )
 
         # Should fail with position not found error
@@ -380,12 +376,12 @@ class TestExchangeEndpointIntegration:
             side="buy",
             size=0.123456789,  # Will be rounded to sz_decimals
             leverage=1,
-            order_type="market"
+            order_type="market",
         )
 
         # Should succeed (or fail for other reasons, but not precision)
         assert "success" in result
-        
+
         # If it failed, it shouldn't be due to precision
         if not result["success"]:
             assert "precision" not in result.get("error", "").lower()

@@ -38,7 +38,9 @@ class OrderSideValidator(BaseModel):
 
 
 class OrderTypeValidator(BaseModel):
-    order_type: Literal["market", "limit"] = Field(default="market", description="Order type")
+    order_type: Literal["market", "limit"] = Field(
+        default="market", description="Order type"
+    )
 
     @field_validator("order_type", mode="before")
     @classmethod

@@ -29,7 +29,9 @@ class TestHyperliquidConfig:
     def test_from_env_derives_wallet_address(self):
         """Test that wallet address is derived from private key when not provided."""
         # Known private key and its corresponding address
-        private_key = "0xb25c7db31feed9122727bf0939dc769a96564b2de4c4726d035b36ecf1e5b364"
+        private_key = (
+            "0xb25c7db31feed9122727bf0939dc769a96564b2de4c4726d035b36ecf1e5b364"
+        )
         expected_address = "0x5ce9454909639D2D17A3F753ce7d93fa0b9aB12E"
 
         env_vars = {
@@ -51,7 +53,9 @@ class TestHyperliquidConfig:
 
     def test_from_env_testnet_flag_variations(self):
         """Test various testnet flag values."""
-        private_key = "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+        private_key = (
+            "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+        )
 
         # Test true values
         for value in ["true", "True", "TRUE", "1", "yes"]:
@@ -75,7 +79,9 @@ class TestHyperliquidConfig:
 
     def test_from_env_default_testnet(self):
         """Test that testnet defaults to True when not specified."""
-        private_key = "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+        private_key = (
+            "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+        )
 
         with patch.dict(
             os.environ, {"HYPERLIQUID_PRIVATE_KEY": private_key}, clear=True
@@ -110,7 +116,9 @@ class TestHyperliquidConfig:
 
     def test_derive_wallet_address(self):
         """Test wallet address derivation from private key."""
-        private_key = "0xb25c7db31feed9122727bf0939dc769a96564b2de4c4726d035b36ecf1e5b364"
+        private_key = (
+            "0xb25c7db31feed9122727bf0939dc769a96564b2de4c4726d035b36ecf1e5b364"
+        )
         expected_address = "0x5ce9454909639D2D17A3F753ce7d93fa0b9aB12E"
 
         address = HyperliquidConfig._derive_wallet_address(private_key)
