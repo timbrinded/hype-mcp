@@ -31,13 +31,13 @@ class HyperliquidClientManager:
     @property
     def info(self) -> Any:
         if self._info_client is None:
-            self._info_client = Info(base_url=self.base_url, skip_ws=True)
+            self._info_client = Info(base_url=self.base_url, skip_ws=False)
         return self._info_client
 
     @property
     def exchange(self) -> Any:
         if self._exchange_client is None:
-            wallet = Account.from_key(self.private_key)
+            wallet = Account.from_key(self.private_key) # pyrefly: ignore
             self._exchange_client = Exchange(
                 wallet=wallet,
                 base_url=self.base_url,

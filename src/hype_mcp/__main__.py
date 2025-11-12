@@ -21,13 +21,10 @@ def main():
 
 async def async_main():
     """Async main function."""
-    # Load and validate configuration from environment variables
     config = load_config()
 
-    # Initialize the MCP server
     server = HyperliquidMCPServer(config)
 
-    # Run the server
     await server.run()
 
 

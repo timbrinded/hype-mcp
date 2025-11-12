@@ -8,6 +8,7 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
+from .asset_router import AssetRouter
 from .client_manager import HyperliquidClientManager
 from .config import HyperliquidConfig
 from .decimal_manager import DecimalPrecisionManager
@@ -22,6 +23,7 @@ from .tools import (
     get_open_orders,
     place_perp_order,
     place_spot_order,
+    transfer_wallet_funds,
 )
 
 
@@ -40,14 +42,13 @@ class HyperliquidMCPServer:
         self.private_key = config.private_key
         self.wallet_address = config.wallet_address
 
-        # Initialize client manager
         self.client_manager = HyperliquidClientManager(
             testnet=self.testnet,
             wallet_address=self.wallet_address,
             private_key=self.private_key,
         )
 
-        # Initialize decimal precision manager
+        self.asset_router = AssetRouter(info_client=self.client_manager.info)
         self.decimal_manager = DecimalPrecisionManager(
             info_client=self.client_manager.info
         )
@@ -66,6 +67,7 @@ class HyperliquidMCPServer:
                 place_spot_order,
                 self.client_manager,
                 self.decimal_manager,
+                self.asset_router,
             ),
             "place_perp_order": partial(
                 place_perp_order,
@@ -78,6 +80,10 @@ class HyperliquidMCPServer:
                 close_position,
                 self.client_manager,
                 self.decimal_manager,
+            ),
+            "transfer_wallet_funds": partial(
+                transfer_wallet_funds,
+                self.client_manager,
             ),
         }
         self._tool_arguments = {
@@ -98,6 +104,7 @@ class HyperliquidMCPServer:
             "cancel_order": ["symbol", "order_id"],
             "cancel_all_orders": ["symbol"],
             "close_position": ["symbol", "size"],
+            "transfer_wallet_funds": ["amount", "direction"],
         }
 
     def _register_tools(self):
@@ -383,6 +390,35 @@ class HyperliquidMCPServer:
                             },
                         },
                         "required": ["symbol"],
+                    },
+                ),
+                Tool(
+                    name="transfer_wallet_funds",
+                    description=(
+                        "Transfer USDC between your perp and spot wallets using Hyperliquid's usdClassTransfer "
+                        "action. Useful for moving collateral into spot for token purchases or back into perp "
+                        "margin."
+                    ),
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "amount": {
+                                "type": "number",
+                                "description": (
+                                    "Amount of USDC to transfer. Must be greater than zero and is denominated "
+                                    "in whole USDC (e.g., 25.5)."
+                                ),
+                            },
+                            "direction": {
+                                "type": "string",
+                                "enum": ["perp_to_spot", "spot_to_perp"],
+                                "description": (
+                                    "Direction of the transfer. Use 'perp_to_spot' to move funds into the "
+                                    "spot wallet or 'spot_to_perp' to move them back into the perp wallet."
+                                ),
+                            },
+                        },
+                        "required": ["amount", "direction"],
                     },
                 ),
             ]

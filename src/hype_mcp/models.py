@@ -13,6 +13,8 @@ class AssetMetadata:
     sz_decimals: int
     max_decimals: int  # 8 for spot, 6 for perp
     max_leverage: Optional[int] = None  # Only for perps
+    spot_index: Optional[int] = None  # Only for spot assets
+    token_id: Optional[str] = None  # Only for spot assets
 
 
 @dataclass

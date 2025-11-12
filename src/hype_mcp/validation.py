@@ -108,6 +108,21 @@ class PerpOrderParams(BaseModel):
         return self
 
 
+class UsdClassTransferParams(BaseModel):
+    amount: float = Field(gt=0)
+    direction: Literal["perp_to_spot", "spot_to_perp"]
+
+    @field_validator("direction", mode="before")
+    @classmethod
+    def normalize_direction(cls, value: str) -> str:
+        normalized = value.lower().strip().replace("-", "_").replace(" ", "_")
+        if normalized not in {"perp_to_spot", "spot_to_perp"}:
+            raise ValueError(
+                "direction must be either 'perp_to_spot' or 'spot_to_perp'"
+            )
+        return normalized
+
+
 class CancelOrderParams(BaseModel):
     symbol: str = Field(min_length=1, max_length=20)
     order_id: int = Field(ge=0)

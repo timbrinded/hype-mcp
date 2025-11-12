@@ -23,28 +23,33 @@ class DecimalPrecisionManager:
         if cached:
             return cached
         loop = asyncio.get_running_loop()
-        meta = await loop.run_in_executor(None, self.info_client.meta)
-        metadata = self._extract_metadata(symbol, meta)
+        perp_meta, spot_meta = await asyncio.gather(
+            loop.run_in_executor(None, self.info_client.meta),
+            loop.run_in_executor(None, self.info_client.spot_meta),
+        )
+        metadata = self._extract_metadata(symbol, perp_meta, spot_meta)
         self._cache[symbol] = metadata
         return metadata
 
-    def _extract_metadata(self, symbol: str, meta: dict) -> AssetMetadata:
-        asset_type = self._detect_asset_type(symbol, meta)
+    def _extract_metadata(
+        self, symbol: str, perp_meta: dict, spot_meta: dict
+    ) -> AssetMetadata:
+        asset_type = self._detect_asset_type(symbol, perp_meta, spot_meta)
         if asset_type == "spot":
-            return self._extract_spot_metadata(symbol, meta)
-        return self._extract_perp_metadata(symbol, meta)
+            return self._extract_spot_metadata(symbol, spot_meta)
+        return self._extract_perp_metadata(symbol, perp_meta)
 
-    def _detect_asset_type(self, symbol: str, meta_response: dict) -> str:
-        for token in meta_response.get("tokens", []):
+    def _detect_asset_type(self, symbol: str, perp_meta: dict, spot_meta: dict) -> str:
+        for token in spot_meta.get("tokens", []):
             if token.get("name") == symbol:
                 return "spot"
-        for asset in meta_response.get("universe", []):
+        for asset in perp_meta.get("universe", []):
             if asset.get("name") == symbol:
                 return "perp"
         raise ValueError(f"Asset '{symbol}' not found in Hyperliquid metadata")
 
-    def _extract_spot_metadata(self, symbol: str, meta_response: dict) -> AssetMetadata:
-        for token in meta_response.get("tokens", []):
+    def _extract_spot_metadata(self, symbol: str, spot_meta: dict) -> AssetMetadata:
+        for token in spot_meta.get("tokens", []):
             if token.get("name") == symbol:
                 return AssetMetadata(
                     symbol=symbol,
@@ -52,6 +57,8 @@ class DecimalPrecisionManager:
                     sz_decimals=token.get("szDecimals", 0),
                     max_decimals=8,
                     max_leverage=None,
+                    spot_index=token.get("index"),
+                    token_id=token.get("tokenId"),
                 )
         raise ValueError(f"Spot asset '{symbol}' not found in metadata")
 

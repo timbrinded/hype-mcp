@@ -5,6 +5,7 @@ from typing import Any, Literal, Optional
 
 from pydantic import ValidationError as PydanticValidationError
 
+from ..asset_router import AssetRouter
 from ..client_manager import HyperliquidClientManager
 from ..decimal_manager import DecimalPrecisionManager
 from ..errors import (
@@ -23,12 +24,14 @@ from ..validation import (
     MarketDataParams,
     PerpOrderParams,
     SpotOrderParams,
+    UsdClassTransferParams,
 )
 
 
 async def place_spot_order(
     client_manager: HyperliquidClientManager,
     decimal_manager: DecimalPrecisionManager,
+    asset_router: AssetRouter,
     symbol: Optional[str] = None,
     side: Optional[Literal["buy", "sell"]] = None,
     size: Optional[float] = None,
@@ -46,7 +49,7 @@ async def place_spot_order(
     except PydanticValidationError as exc:
         return format_error_response(exc)
 
-    symbol = params.symbol
+    user_symbol = params.symbol
     side = params.side
     size = params.size
     price = params.price
@@ -54,13 +57,52 @@ async def place_spot_order(
 
     try:
         try:
+            spot_token = asset_router.resolve_spot_symbol(user_symbol)
+        except AssetNotFoundError as exc:
+            return format_error_response(exc)
+
+        symbol = spot_token.symbol
+        api_symbol = spot_token.api_symbol
+
+        try:
+            metadata = await decimal_manager.get_asset_metadata(symbol)
+        except ValueError as exc:
+            raise AssetNotFoundError(user_symbol) from exc
+
+        if metadata.asset_type != "spot":
+            raise ValidationError(
+                message=f"{user_symbol} is not a spot asset.",
+                field="symbol",
+                value=user_symbol,
+                constraint="spot orders require spot assets",
+            )
+
+        if spot_token.token_index < 0:
+            raise ValidationError(
+                message=f"Spot asset metadata for {user_symbol} is missing token index.",
+                field="symbol",
+                value=user_symbol,
+                constraint="spot assets must provide an index identifier",
+            )
+
+        if spot_token.market_index is None:
+            raise ValidationError(
+                message=(
+                    f"Spot market metadata for {user_symbol} is missing the USDC pair index."
+                ),
+                field="symbol",
+                value=user_symbol,
+                constraint="spot assets must provide a market identifier",
+            )
+
+        try:
             formatted_size = await decimal_manager.format_size_for_api(symbol, size)
         except ValueError as exc:
             if "not found" in str(exc).lower():
-                raise AssetNotFoundError(symbol) from exc
+                raise AssetNotFoundError(user_symbol) from exc
             raise PrecisionError(
-                message=f"Invalid size precision for {symbol}: {exc}",
-                symbol=symbol,
+                message=f"Invalid size precision for {user_symbol}: {exc}",
+                symbol=user_symbol,
                 value=size,
                 constraint="size must match asset's szDecimals",
             ) from exc
@@ -78,8 +120,8 @@ async def place_spot_order(
                     else "price must match asset's decimal constraints"
                 )
                 raise PrecisionError(
-                    message=f"Invalid price precision for {symbol}: {exc}",
-                    symbol=symbol,
+                    message=f"Invalid price precision for {user_symbol}: {exc}",
+                    symbol=user_symbol,
                     value=price,
                     constraint=constraint,
                 ) from exc
@@ -91,7 +133,7 @@ async def place_spot_order(
             if order_type == "market":
                 result = await asyncio.to_thread(
                     client_manager.exchange.market_open,
-                    name=symbol,
+                    name=api_symbol,
                     is_buy=is_buy,
                     sz=float(formatted_size),
                     px=None,
@@ -102,14 +144,14 @@ async def place_spot_order(
                 # limit orders always have a price after validation
                 if limit_px is None:
                     raise PrecisionError(
-                        message=f"Limit order for {symbol} requires a price",
-                        symbol=symbol,
+                        message=f"Limit order for {user_symbol} requires a price",
+                        symbol=user_symbol,
                         value=price or 0,
                         constraint="limit orders must include price",
                     )
                 result = await asyncio.to_thread(
                     client_manager.exchange.order,
-                    name=symbol,
+                    name=api_symbol,
                     is_buy=is_buy,
                     sz=float(formatted_size),
                     limit_px=limit_px,
@@ -599,3 +641,69 @@ async def close_position(
         return format_error_response(e)
     except Exception as e:
         return format_error_response(e)
+
+
+async def transfer_wallet_funds(
+    client_manager: HyperliquidClientManager,
+    amount: Optional[float] = None,
+    direction: Optional[str] = None,
+) -> dict[str, Any]:
+    """Transfer USDC between perp and spot wallets."""
+
+    try:
+        params = UsdClassTransferParams(amount=amount, direction=direction)
+    except PydanticValidationError as exc:
+        return format_error_response(exc)
+
+    to_perp = params.direction == "spot_to_perp"
+
+    try:
+        exchange = client_manager.exchange
+        wallet_address = getattr(getattr(exchange, "wallet", None), "address", None)
+        account_address = getattr(exchange, "account_address", None)
+
+        if account_address and wallet_address:
+            if account_address.lower() != wallet_address.lower():
+                raise ValidationError(
+                    message=(
+                        "Internal transfers require the configured account address "
+                        "to match the signing wallet. Update your configuration or "
+                        "run the server with direct wallet control."
+                    ),
+                    field="direction",
+                    value=params.direction,
+                    constraint="account_address must equal wallet address for transfers",
+                )
+
+        try:
+            result = await asyncio.to_thread(
+                exchange.usd_class_transfer,
+                float(params.amount),
+                to_perp,
+            )
+        except Exception as exc:
+            raise APIError(
+                message=f"Failed to submit wallet transfer to Hyperliquid API: {exc}",
+                api_response=None,
+            ) from exc
+
+        if result.get("status") != "ok":
+            raise APIError(
+                message=f"Wallet transfer rejected by Hyperliquid: {result.get('response', 'Unknown error')}",
+                api_response=result,
+            )
+
+        return {
+            "success": True,
+            "data": {
+                "status": result.get("status", "unknown"),
+                "response": result.get("response", {}),
+                "direction": params.direction,
+                "amount": float(params.amount),
+            },
+        }
+
+    except (ValidationError, APIError) as exc:
+        return format_error_response(exc)
+    except Exception as exc:
+        return format_error_response(exc)

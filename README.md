@@ -156,7 +156,10 @@ List all available assets
 
 #### `place_spot_order`
 
-Place a spot market order with automatic decimal precision handling.
+Place a spot market order with automatic decimal precision handling. The server
+loads spot/perp mappings on startup, so you can pass either the canonical spot
+token (e.g., `UETH`) or the familiar perp symbol (e.g., `ETH`) and the MCP will
+route the order to the correct `@index` identifier automatically.
 
 **Parameters:**
 - `symbol` (required): Spot asset symbol (e.g., "PURR", "HYPE")
@@ -242,6 +245,26 @@ Close a perpetual position (full or partial).
 Close my entire BTC position
 
 Close 0.5 ETH from my position
+```
+
+---
+
+#### `transfer_wallet_funds`
+
+Transfer USDC between the perp wallet (perp margin) and the spot wallet using
+Hyperliquid's `usdClassTransfer` action. Useful for funding spot purchases or
+moving idle spot capital back into perp margin.
+
+**Parameters:**
+- `amount` (required): Amount of USDC to transfer (e.g., 150.25)
+- `direction` (required): `perp_to_spot` to move funds into spot, or
+  `spot_to_perp` to move funds back into the perp wallet
+
+**Examples:**
+```
+Move 200 USDC from perp to spot
+
+Move 75 USDC from spot to perp
 ```
 
 ---

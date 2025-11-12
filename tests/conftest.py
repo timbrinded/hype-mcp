@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from hype_mcp.asset_router import AssetRouter
 from hype_mcp.client_manager import HyperliquidClientManager
 from hype_mcp.config import HyperliquidConfig
 from hype_mcp.decimal_manager import DecimalPrecisionManager
@@ -65,7 +66,12 @@ def mock_info_client():
             "tokens": [
                 {"name": "PURR", "szDecimals": 2, "index": 0},
                 {"name": "HYPE", "szDecimals": 2, "index": 1},
-            ]
+                {"name": "USDC", "szDecimals": 6, "index": 2},
+            ],
+            "universe": [
+                {"tokens": [0, 2], "name": "@700", "index": 700},
+                {"tokens": [1, 2], "name": "@701", "index": 701},
+            ],
         }
     )
     mock.meta_and_asset_ctxs = Mock(
@@ -109,6 +115,17 @@ def mock_exchange_client():
             },
         }
     )
+    mock.market_open = Mock(
+        return_value={
+            "status": "ok",
+            "response": {
+                "type": "order",
+                "data": {
+                    "statuses": [{"filled": {"totalSz": "0.1", "avgPx": "50000"}}]
+                },
+            },
+        }
+    )
     mock.cancel = Mock(
         return_value={
             "status": "ok",
@@ -124,6 +141,22 @@ def mock_exchange_client():
             },
         }
     )
+    mock.usd_class_transfer = Mock(
+        return_value={
+            "status": "ok",
+            "response": {
+                "type": "usdClassTransfer",
+                "data": {
+                    "nonce": 1234567890,
+                    "amount": "1.0",
+                    "toPerp": True,
+                },
+            },
+        }
+    )
+    mock.wallet = Mock()
+    mock.wallet.address = "0x5ce9454909639D2D17A3F753ce7d93fa0b9aB12E"
+    mock.account_address = mock.wallet.address
 
     return mock
 
@@ -141,6 +174,12 @@ def mock_client_manager(
     manager.exchange = mock_exchange_client
 
     return manager
+
+
+@pytest.fixture
+def mock_asset_router(mock_info_client) -> AssetRouter:
+    """Provide an AssetRouter backed by the mocked info client."""
+    return AssetRouter(mock_info_client)
 
 
 @pytest.fixture
@@ -255,6 +294,14 @@ async def integration_decimal_manager(
 ) -> DecimalPrecisionManager:
     """Create a real DecimalPrecisionManager for integration tests."""
     return DecimalPrecisionManager(integration_client_manager.info)
+
+
+@pytest.fixture
+async def integration_asset_router(
+    integration_client_manager: HyperliquidClientManager,
+) -> AssetRouter:
+    """Create a real AssetRouter for integration tests."""
+    return AssetRouter(integration_client_manager.info)
 
 
 # Pytest configuration

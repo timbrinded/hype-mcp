@@ -20,10 +20,14 @@ class TestDecimalPrecisionManager:
                     {"name": "ETH", "szDecimals": 3, "maxLeverage": 50},
                     {"name": "SOL", "szDecimals": 2, "maxLeverage": 20},
                 ],
+            }
+        )
+        mock.spot_meta = Mock(
+            return_value={
                 "tokens": [
-                    {"name": "PURR", "szDecimals": 2, "index": 0},
-                    {"name": "HYPE", "szDecimals": 1, "index": 1},
-                ],
+                    {"name": "PURR", "szDecimals": 2, "index": 0, "tokenId": "0x1"},
+                    {"name": "HYPE", "szDecimals": 1, "index": 1, "tokenId": "0x2"},
+                ]
             }
         )
         return mock
@@ -54,6 +58,8 @@ class TestDecimalPrecisionManager:
         assert metadata.sz_decimals == 2
         assert metadata.max_decimals == 8
         assert metadata.max_leverage is None
+        assert metadata.spot_index == 0
+        assert metadata.token_id == "0x1"
 
     @pytest.mark.asyncio
     async def test_get_asset_metadata_caching(self, manager, mock_info_client):
@@ -61,10 +67,12 @@ class TestDecimalPrecisionManager:
         # First call should fetch from API
         await manager.get_asset_metadata("BTC")
         assert mock_info_client.meta.call_count == 1
+        assert mock_info_client.spot_meta.call_count == 1
 
         # Second call should use cache
         await manager.get_asset_metadata("BTC")
         assert mock_info_client.meta.call_count == 1  # Still 1, not 2
+        assert mock_info_client.spot_meta.call_count == 1
 
     @pytest.mark.asyncio
     async def test_get_asset_metadata_not_found(self, manager):
@@ -191,29 +199,32 @@ class TestDecimalPrecisionManager:
     @pytest.mark.asyncio
     async def test_detect_asset_type_perp(self, manager, mock_info_client):
         """Test detecting perpetual asset type."""
-        meta_response = mock_info_client.meta()
-        asset_type = manager._detect_asset_type("BTC", meta_response)
+        perp_meta = mock_info_client.meta()
+        spot_meta = mock_info_client.spot_meta()
+        asset_type = manager._detect_asset_type("BTC", perp_meta, spot_meta)
         assert asset_type == "perp"
 
     @pytest.mark.asyncio
     async def test_detect_asset_type_spot(self, manager, mock_info_client):
         """Test detecting spot asset type."""
-        meta_response = mock_info_client.meta()
-        asset_type = manager._detect_asset_type("PURR", meta_response)
+        perp_meta = mock_info_client.meta()
+        spot_meta = mock_info_client.spot_meta()
+        asset_type = manager._detect_asset_type("PURR", perp_meta, spot_meta)
         assert asset_type == "spot"
 
     @pytest.mark.asyncio
     async def test_detect_asset_type_not_found(self, manager, mock_info_client):
         """Test that unknown asset raises ValueError."""
-        meta_response = mock_info_client.meta()
+        perp_meta = mock_info_client.meta()
+        spot_meta = mock_info_client.spot_meta()
         with pytest.raises(ValueError, match="Asset 'INVALID' not found"):
-            manager._detect_asset_type("INVALID", meta_response)
+            manager._detect_asset_type("INVALID", perp_meta, spot_meta)
 
     @pytest.mark.asyncio
     async def test_extract_spot_metadata(self, manager, mock_info_client):
         """Test extracting spot asset metadata."""
-        meta_response = mock_info_client.meta()
-        metadata = manager._extract_spot_metadata("PURR", meta_response)
+        spot_meta = mock_info_client.spot_meta()
+        metadata = manager._extract_spot_metadata("PURR", spot_meta)
 
         assert metadata.symbol == "PURR"
         assert metadata.asset_type == "spot"

@@ -143,7 +143,10 @@ class TestExchangeEndpointIntegration:
 
     @pytest.mark.asyncio
     async def test_place_spot_order_market(
-        self, integration_client_manager, integration_decimal_manager
+        self,
+        integration_client_manager,
+        integration_decimal_manager,
+        integration_asset_router,
     ):
         """Test spot market order placement."""
         # Get available spot assets
@@ -159,6 +162,7 @@ class TestExchangeEndpointIntegration:
         result = await place_spot_order(
             integration_client_manager,
             integration_decimal_manager,
+            integration_asset_router,
             symbol=spot_symbol,
             side="buy",
             size=0.01,  # Very small size for testing
@@ -171,7 +175,10 @@ class TestExchangeEndpointIntegration:
 
     @pytest.mark.asyncio
     async def test_place_spot_order_limit(
-        self, integration_client_manager, integration_decimal_manager
+        self,
+        integration_client_manager,
+        integration_decimal_manager,
+        integration_asset_router,
     ):
         """Test spot limit order placement."""
         assets_result = await get_all_assets(integration_client_manager)
@@ -194,6 +201,7 @@ class TestExchangeEndpointIntegration:
         result = await place_spot_order(
             integration_client_manager,
             integration_decimal_manager,
+            integration_asset_router,
             symbol=spot_symbol,
             side="buy",
             size=0.01,

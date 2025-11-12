@@ -63,7 +63,7 @@ class HyperliquidConfig:
     @staticmethod
     def _derive_wallet_address(private_key: str) -> str:
         try:
-            return Account.from_key(private_key).address
+            return Account.from_key(private_key).address # pyrefly: ignore
         except Exception as exc:  # pragma: no cover - SDK errors bubble up
             raise ValueError(
                 f"Failed to derive wallet address from private key: {exc}"

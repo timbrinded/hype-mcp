@@ -12,6 +12,7 @@ from .exchange_tools import (
     cancel_order,
     cancel_all_orders,
     close_position,
+    transfer_wallet_funds,
 )
 
 __all__ = [
@@ -24,4 +25,5 @@ __all__ = [
     "cancel_order",
     "cancel_all_orders",
     "close_position",
+    "transfer_wallet_funds",
 ]
