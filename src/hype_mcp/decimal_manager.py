@@ -14,9 +14,7 @@ class DecimalPrecisionManager:
 
     def __init__(self, info_client) -> None:
         self.info_client = info_client
-        self._cache: TTLCache[str, AssetMetadata] = TTLCache(
-            maxsize=1000, ttl=self.CACHE_TTL
-        )
+        self._cache = TTLCache(maxsize=1000, ttl=self.CACHE_TTL)
 
     async def get_asset_metadata(self, symbol: str) -> AssetMetadata:
         cached = self._cache.get(symbol)
