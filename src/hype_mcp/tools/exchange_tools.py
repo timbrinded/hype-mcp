@@ -3,6 +3,7 @@
 import asyncio
 from typing import Any, Literal, Optional
 
+from hyperliquid.utils.signing import OrderType
 from pydantic import ValidationError as PydanticValidationError
 
 from ..asset_router import AssetRouter
@@ -26,6 +27,15 @@ from ..validation import (
     SpotOrderParams,
     UsdClassTransferParams,
 )
+
+
+DEFAULT_MARKET_SLIPPAGE = 0.05
+
+
+def _limit_order_type(tif: Literal["Alo", "Ioc", "Gtc"]) -> OrderType:
+    """Hyperliquid expects market orders as IOC limit orders."""
+
+    return {"limit": {"tif": tif}}
 
 
 async def place_spot_order(
@@ -137,10 +147,9 @@ async def place_spot_order(
                     is_buy=is_buy,
                     sz=float(formatted_size),
                     px=None,
-                    slippage=0.05,
+                    slippage=DEFAULT_MARKET_SLIPPAGE,
                 )
             else:
-                order_type_dict: Any = {"limit": {"tif": "Gtc"}}
                 # limit orders always have a price after validation
                 if limit_px is None:
                     raise PrecisionError(
@@ -155,7 +164,7 @@ async def place_spot_order(
                     is_buy=is_buy,
                     sz=float(formatted_size),
                     limit_px=limit_px,
-                    order_type=order_type_dict,
+                    order_type=_limit_order_type("Gtc"),
                     reduce_only=False,
                 )
         except Exception as exc:
@@ -271,14 +280,20 @@ async def place_perp_order(
                     is_buy=is_buy,
                     sz=float(formatted_size),
                     px=None,
-                    slippage=0.05,
+                    slippage=DEFAULT_MARKET_SLIPPAGE,
                 )
             else:
                 if order_type == "market":
-                    order_type_dict: Any = {"market": {}}
-                    limit_value = 0.0
+                    market_px = await asyncio.to_thread(
+                        client_manager.exchange._slippage_price,
+                        symbol,
+                        is_buy,
+                        DEFAULT_MARKET_SLIPPAGE,
+                        None,
+                    )
+                    limit_value = float(market_px)
+                    order_type_dict = _limit_order_type("Ioc")
                 else:
-                    order_type_dict = {"limit": {"tif": "Gtc"}}
                     if limit_px is None:
                         raise PrecisionError(
                             message=f"Limit order for {symbol} requires a price",
@@ -287,6 +302,8 @@ async def place_perp_order(
                             constraint="limit orders must include price",
                         )
                     limit_value = limit_px
+                    order_type_dict = _limit_order_type("Gtc")
+
                 result = await asyncio.to_thread(
                     client_manager.exchange.order,
                     name=symbol,
@@ -343,10 +360,11 @@ async def cancel_order(
     order_id = params.order_id
 
     try:
-        cancel_params = {"coin": symbol, "oid": order_id}
         try:
             result = await asyncio.to_thread(
-                client_manager.exchange.cancel, cancel_params
+                client_manager.exchange.cancel,
+                symbol,
+                order_id,
             )
         except Exception as exc:
             raise APIError(
@@ -424,11 +442,11 @@ async def cancel_all_orders(
         failed_cancellations: list[dict[str, Any]] = []
 
         for order in orders_to_cancel:
-            cancel_params = {"coin": order["coin"], "oid": order["oid"]}
             try:
                 result = await asyncio.to_thread(
                     client_manager.exchange.cancel,
-                    cancel_params,
+                    order["coin"],
+                    order["oid"],
                 )
                 if result.get("status") == "ok":
                     cancelled_count += 1

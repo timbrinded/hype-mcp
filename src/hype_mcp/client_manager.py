@@ -1,7 +1,7 @@
 """Hyperliquid client manager for Info and Exchange endpoints."""
 
 import asyncio
-from typing import Any, Optional
+from typing import Optional
 
 from eth_account import Account
 from hyperliquid.exchange import Exchange
@@ -25,17 +25,18 @@ class HyperliquidClientManager:
             if self.testnet
             else "https://api.hyperliquid.xyz"
         )
-        self._info_client: Any = None
-        self._exchange_client: Any = None
+        self._info_client: Optional[Info] = None
+        self._exchange_client: Optional[Exchange] = None
 
     @property
-    def info(self) -> Any:
+    def info(self) -> Info:
         if self._info_client is None:
             self._info_client = Info(base_url=self.base_url, skip_ws=False)
+        assert self._info_client is not None
         return self._info_client
 
     @property
-    def exchange(self) -> Any:
+    def exchange(self) -> Exchange:
         if self._exchange_client is None:
             wallet = Account.from_key(self.private_key)  # pyrefly: ignore
             self._exchange_client = Exchange(
@@ -43,6 +44,7 @@ class HyperliquidClientManager:
                 base_url=self.base_url,
                 account_address=self.account_address,
             )
+        assert self._exchange_client is not None
         return self._exchange_client
 
     async def validate_connection(self) -> bool:

@@ -1,6 +1,7 @@
 """Info endpoint MCP tools for read-only operations."""
 
 import asyncio
+from collections.abc import Mapping, Sequence
 from typing import Any, Optional
 
 from pydantic import ValidationError as PydanticValidationError
@@ -123,7 +124,7 @@ async def get_market_data(
             }
 
     spot_meta = None
-    spot_token_meta: Optional[dict[str, Any]] = None
+    spot_token_meta: Optional[Mapping[str, Any]] = None
     spot_lookup_symbol = symbol
     spot_market_index: Optional[int] = None
     spot_quote_symbol: Optional[str] = None
@@ -239,8 +240,8 @@ def _extract_asset_contexts(response: Any) -> list[dict[str, Any]]:
 
 
 def _match_spot_token(
-    symbol: Optional[str], tokens: list[dict[str, Any]]
-) -> Optional[dict[str, Any]]:
+    symbol: Optional[str], tokens: Sequence[Mapping[str, Any]]
+) -> Optional[Mapping[str, Any]]:
     if symbol is None:
         return None
     for token in tokens:
@@ -251,7 +252,7 @@ def _match_spot_token(
 
 
 def _derive_spot_market_details(
-    spot_token: dict[str, Any], spot_meta: dict[str, Any]
+    spot_token: Mapping[str, Any], spot_meta: Mapping[str, Any]
 ) -> tuple[Optional[int], Optional[str]]:
     base_index = spot_token.get("index")
     if base_index is None:
