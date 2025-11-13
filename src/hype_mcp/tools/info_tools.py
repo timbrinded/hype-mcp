@@ -5,6 +5,7 @@ from typing import Any, Optional
 
 from pydantic import ValidationError as PydanticValidationError
 
+from ..asset_router import AssetRouter
 from ..client_manager import HyperliquidClientManager
 from ..errors import APIError, AssetNotFoundError, format_error_response
 from ..validation import MarketDataParams, WalletAddressParams
@@ -57,6 +58,8 @@ async def get_open_orders(
 async def get_market_data(
     client_manager: HyperliquidClientManager,
     symbol: Optional[str] = None,
+    *,
+    asset_router: Optional[AssetRouter] = None,
 ) -> dict[str, Any]:
     try:
         params = MarketDataParams(symbol=symbol)
@@ -120,17 +123,72 @@ async def get_market_data(
             }
 
     spot_meta = None
+    spot_token_meta: Optional[dict[str, Any]] = None
+    spot_lookup_symbol = symbol
+    spot_market_index: Optional[int] = None
+    spot_quote_symbol: Optional[str] = None
+    spot_match_keys: set[str] = {symbol}
+
+    if asset_router is not None:
+        try:
+            spot_info = asset_router.resolve_spot_symbol(symbol)
+            spot_lookup_symbol = spot_info.symbol
+            spot_market_index = spot_info.market_index
+            spot_quote_symbol = spot_info.quote_symbol
+            spot_match_keys.update(
+                _build_spot_context_keys(
+                    user_symbol=symbol,
+                    canonical_symbol=spot_info.symbol,
+                    quote_symbol=spot_info.quote_symbol,
+                    market_index=spot_info.market_index,
+                )
+            )
+        except AssetNotFoundError:
+            spot_info = None
+    else:
+        spot_info = None
     try:
         spot_meta = await asyncio.to_thread(client_manager.info.spot_meta)
     except Exception:
         pass
 
     if spot_meta and "tokens" in spot_meta:
-        spot_token = next(
-            (token for token in spot_meta["tokens"] if token.get("name") == symbol),
-            None,
-        )
-        if spot_token:
+        spot_token_meta = _match_spot_token(spot_lookup_symbol, spot_meta["tokens"])
+        if spot_token_meta is None and spot_lookup_symbol != symbol:
+            spot_token_meta = _match_spot_token(symbol, spot_meta["tokens"])
+
+        canonical_symbol = None
+        if spot_token_meta and spot_token_meta.get("name"):
+            canonical_symbol = (spot_token_meta.get("name") or "").upper()
+        elif spot_info:
+            canonical_symbol = spot_info.symbol
+
+        if spot_token_meta or spot_info:
+            derived_market_index, derived_quote_symbol = (None, None)
+            if spot_token_meta:
+                (
+                    derived_market_index,
+                    derived_quote_symbol,
+                ) = _derive_spot_market_details(spot_token_meta, spot_meta)
+
+            if spot_market_index is None:
+                spot_market_index = (
+                    spot_info.market_index if spot_info else derived_market_index
+                )
+            if spot_quote_symbol is None:
+                spot_quote_symbol = (
+                    spot_info.quote_symbol if spot_info else derived_quote_symbol
+                )
+
+            spot_match_keys.update(
+                _build_spot_context_keys(
+                    user_symbol=symbol,
+                    canonical_symbol=canonical_symbol,
+                    quote_symbol=spot_quote_symbol,
+                    market_index=spot_market_index,
+                )
+            )
+
             try:
                 spot_mids = await asyncio.to_thread(
                     client_manager.info.spot_meta_and_asset_ctxs
@@ -147,7 +205,7 @@ async def get_market_data(
                 (
                     ctx
                     for ctx in spot_ctxs
-                    if isinstance(ctx, dict) and ctx.get("coin") == symbol
+                    if isinstance(ctx, dict) and ctx.get("coin") in spot_match_keys
                 ),
                 None,
             )
@@ -178,6 +236,78 @@ def _extract_asset_contexts(response: Any) -> list[dict[str, Any]]:
                 if isinstance(ctxs, list):
                     return ctxs
     return []
+
+
+def _match_spot_token(
+    symbol: Optional[str], tokens: list[dict[str, Any]]
+) -> Optional[dict[str, Any]]:
+    if symbol is None:
+        return None
+    for token in tokens:
+        name = token.get("name")
+        if isinstance(name, str) and name.upper() == symbol:
+            return token
+    return None
+
+
+def _derive_spot_market_details(
+    spot_token: dict[str, Any], spot_meta: dict[str, Any]
+) -> tuple[Optional[int], Optional[str]]:
+    base_index = spot_token.get("index")
+    if base_index is None:
+        return None, None
+    quote_symbol: Optional[str] = None
+    market_index: Optional[int] = None
+    markets = spot_meta.get("universe") or []
+    tokens = spot_meta.get("tokens") or []
+
+    for market in markets:
+        pair = market.get("tokens") or []
+        if len(pair) < 2 or pair[0] != base_index:
+            continue
+        market_index = market.get("index")
+        if not isinstance(market_index, int):
+            name = market.get("name")
+            if isinstance(name, str) and name.startswith("@") and name[1:].isdigit():
+                market_index = int(name[1:])
+        quote_index = pair[1]
+        for token in tokens:
+            if token.get("index") == quote_index:
+                quote_name = token.get("name")
+                if isinstance(quote_name, str):
+                    quote_symbol = quote_name.upper()
+                break
+        break
+
+    return market_index, quote_symbol
+
+
+def _build_spot_context_keys(
+    *,
+    user_symbol: str,
+    canonical_symbol: Optional[str],
+    quote_symbol: Optional[str],
+    market_index: Optional[int],
+) -> set[str]:
+    keys: set[str] = set()
+
+    if canonical_symbol:
+        keys.add(canonical_symbol)
+        if canonical_symbol.startswith("U") and len(canonical_symbol) > 1:
+            stripped = canonical_symbol[1:]
+            keys.add(stripped)
+            if quote_symbol:
+                keys.add(f"{stripped}/{quote_symbol}")
+
+    if quote_symbol:
+        if canonical_symbol:
+            keys.add(f"{canonical_symbol}/{quote_symbol}")
+        keys.add(f"{user_symbol}/{quote_symbol}")
+
+    if market_index is not None:
+        keys.add(f"@{market_index}")
+
+    return {key for key in keys if key}
 
 
 async def get_all_assets(

@@ -1,8 +1,11 @@
 """Tests for MCP tools."""
 
-import pytest
+from typing import cast
 from unittest.mock import Mock
 
+import pytest
+
+from hype_mcp.asset_router import AssetRouter, SpotTokenInfo
 from hype_mcp.client_manager import HyperliquidClientManager
 from hype_mcp.tools import (
     get_account_state,
@@ -111,6 +114,53 @@ async def test_get_market_data_invalid_symbol(mock_client_manager):
 
     assert result["success"] is False
     assert "not found" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_get_market_data_spot_with_market_index(mock_client_manager):
+    """Ensure spot market data resolves via router-provided market index."""
+    mock_client_manager.info.all_mids.return_value = {}
+    mock_client_manager.info.spot_meta.return_value = {
+        "tokens": [
+            {"name": "HYPE", "szDecimals": 2, "index": 1},
+            {"name": "USDC", "szDecimals": 6, "index": 2},
+        ],
+        "universe": [
+            {"tokens": [1, 2], "name": "@701", "index": 701, "isCanonical": True}
+        ],
+    }
+    mock_client_manager.info.spot_meta_and_asset_ctxs.return_value = [
+        [
+            {
+                "coin": "@701",
+                "markPx": "0.12",
+                "midPx": "0.121",
+                "prevDayPx": "0.11",
+                "dayNtlVlm": "12345",
+            }
+        ]
+    ]
+
+    router_mock = Mock(spec=AssetRouter)
+    router_mock.resolve_spot_symbol.return_value = SpotTokenInfo(
+        symbol="HYPE",
+        token_index=1,
+        sz_decimals=2,
+        full_name="Hyperliquid",
+        market_index=701,
+        quote_token_index=2,
+        quote_symbol="USDC",
+    )
+
+    result = await get_market_data(
+        mock_client_manager,
+        "HYPE",
+        asset_router=cast(AssetRouter, router_mock),
+    )
+
+    assert result["success"] is True
+    assert result["data"]["coin"] == "HYPE"
+    assert result["data"]["midPx"] == "0.121"
 
 
 @pytest.mark.asyncio

@@ -198,3 +198,72 @@ class TestAssetRouter:
         refreshed = router.resolve_spot_symbol("FARTCOIN")
         assert refreshed.symbol == "UFART"
         assert refreshed.api_symbol == "@3002"
+
+    def test_prefers_usdc_pair_when_available(self):
+        tokens = [
+            {"name": "USDC", "szDecimals": 2, "index": 0},
+            {"name": "UETH", "szDecimals": 4, "index": 10},
+            {"name": "UHYPE", "szDecimals": 2, "index": 100},
+        ]
+        universe = [
+            {"tokens": [100, 10], "name": "@4001", "index": 4001, "isCanonical": True},
+            {"tokens": [100, 0], "name": "@4002", "index": 4002, "isCanonical": False},
+        ]
+        client = StubInfoClient(spot_tokens=tokens, spot_universe=universe)
+        router = AssetRouter(client)
+
+        spot = router.resolve_spot_symbol("HYPE")
+        assert spot.market_index == 4002
+        assert spot.quote_token_index == 0
+
+    def test_falls_back_to_major_quote_when_usdc_missing(self):
+        tokens = [
+            {"name": "USDC", "szDecimals": 2, "index": 0},
+            {"name": "UBTC", "szDecimals": 4, "index": 11},
+            {"name": "UETH", "szDecimals": 4, "index": 10},
+            {"name": "UHYPE", "szDecimals": 2, "index": 100},
+        ]
+        universe = [
+            {"tokens": [100, 11], "name": "@5002", "index": 5002, "isCanonical": True},
+            {"tokens": [100, 10], "name": "@5001", "index": 5001, "isCanonical": False},
+        ]
+        client = StubInfoClient(spot_tokens=tokens, spot_universe=universe)
+        router = AssetRouter(client)
+
+        spot = router.resolve_spot_symbol("HYPE")
+        # UETH (index 10) should be preferred over UBTC when USDC pair missing
+        assert spot.market_index == 5001
+        assert spot.quote_token_index == 10
+
+    def test_canonical_symbol_overrides_alias_collisions(self):
+        tokens = [
+            {"name": "USDC", "szDecimals": 2, "index": 0},
+            {
+                "name": "TEESTI",
+                "szDecimals": 2,
+                "index": 10,
+                "fullName": "hype",
+                "tokenId": "0xteesti",
+            },
+            {
+                "name": "HYPE",
+                "szDecimals": 2,
+                "index": 11,
+                "fullName": "Hyperliquid",
+                "tokenId": "0xhype",
+            },
+        ]
+        universe = [
+            {
+                "tokens": [11, 0],
+                "name": "@6001",
+                "index": 6001,
+                "isCanonical": True,
+            }
+        ]
+        client = StubInfoClient(spot_tokens=tokens, spot_universe=universe)
+        router = AssetRouter(client)
+
+        spot = router.resolve_spot_symbol("HYPE")
+        assert spot.symbol == "HYPE"
+        assert spot.market_index == 6001

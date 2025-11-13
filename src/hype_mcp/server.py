@@ -61,7 +61,11 @@ class HyperliquidMCPServer:
         self._tool_handlers = {
             "get_account_state": partial(get_account_state, self.client_manager),
             "get_open_orders": partial(get_open_orders, self.client_manager),
-            "get_market_data": partial(get_market_data, self.client_manager),
+            "get_market_data": partial(
+                get_market_data,
+                self.client_manager,
+                asset_router=self.asset_router,
+            ),
             "get_all_assets": partial(get_all_assets, self.client_manager),
             "place_spot_order": partial(
                 place_spot_order,
